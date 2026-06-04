@@ -22,7 +22,7 @@ def permission(codename: str = '') -> Depends:
         if user.is_superuser:
             return
         user_db = await get_user_db(db, user.id, roles=True, permissions=True)
-        if _has_permission(user_db, codename):
+        if user_db and _has_permission(user_db, codename):
             return
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Permission denied")
 

@@ -10,7 +10,7 @@ from sqlalchemy.orm import InstrumentedAttribute as Col, joinedload
 
 from models import TableBase, SessionDB, UserDB, RoleDB
 from schemas import RegisterUserForm
-from settings import password_hasher, get_utc_now
+from settings import settings, get_utc_now
 
 
 logger = getLogger(__name__)
@@ -123,9 +123,10 @@ async def _get_many[T: TableBase, C](db: AsyncSession, table_col: type[T] | Col[
 
 
 async def get_roles_db(db: AsyncSession, *, permissions=False, **kwargs):
-    kwargs = {}
     if permissions:
-        kwargs = {'options': joinedload(RoleDB.permissions), 'unique': True}
+        if "options" in kwargs or "unique" in kwargs:
+            raise ValueError("Cannot use options or unique when permissions used")
+        kwargs |= {"options": joinedload(RoleDB.permissions), "unique": True}
     return await _get_many(db, RoleDB, **kwargs)
 
 
@@ -169,6 +170,7 @@ async def delete_sessions_db(db: AsyncSession, user_id: UUID):
 def _check_password(hashed_password: str, password: str) -> str | None:
     """Returns None at wrong password or new hash for password if rehash needed, else empty str"""
     try:
+        password_hasher = settings.password_hasher
         password_hasher.verify(hashed_password, password)
         if password_hasher.check_needs_rehash(hashed_password):
             return password_hasher.hash(password)

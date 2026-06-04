@@ -22,7 +22,7 @@ async def register(request: Request, response: Response, db: DBDep, form: Regist
         raise HTTPException(status.HTTP_409_CONFLICT, "Email already registered")
 
     user = await create_user_db(db, form)
-    session = await create_session_db(db, user.id, request.headers.get("user-agent"))
+    session = await create_session_db(db, user.id, request.headers.get("user-agent", ""))
     set_cookie(response, str(session.id))
     return Message(message="User registration successful")
 
@@ -72,7 +72,7 @@ async def login(email: EmailStr, password: SecretStr, request: Request, response
     if not user_db.is_active:
         raise HTTPException(status.HTTP_409_CONFLICT, "User is suspended")
 
-    session = await create_session_db(db, user_db.id, request.headers.get("user-agent"))  # noqa sqlalchemy Mapped linter bug
+    session = await create_session_db(db, user_db.id, request.headers.get("user-agent"))
     set_cookie(response, str(session.id))
     return Message(message="User login successful")
 

@@ -5,10 +5,10 @@ from fastapi import FastAPI
 from database import DBMiddleware, create_db_lifespan
 from routers import user, secure
 from sessions import SessionMiddleware
-from settings import debug
+from settings import settings
 
 
-logging.getLogger().setLevel(logging.DEBUG if debug else logging.ERROR)
+logging.getLogger().setLevel(logging.DEBUG if settings.debug else logging.ERROR)
 logging.info('App is loading')
 
 

@@ -1,3 +1,5 @@
+from collections.abc import Callable
+
 from httpx import Client
 from pytest import mark, param
 
@@ -106,7 +108,7 @@ class TestUser:
         # todo: Multiple sessions per user tests
         # todo: Pydantic validators tests
     ])
-    def test_user(self, client: Client, result_func, args, kwargs):
+    def test_user(self, client: Client, result_func: Callable, args, kwargs):
         assert result_func(client.request(*args, **kwargs))
 
 
@@ -159,5 +161,5 @@ class TestSecure:
         param(is_equal(200, su_str), admin, {}, id='Access admin as superuser'),
         param(logout_ok, logout, {}, id='Logout superuser'),
     ])
-    def test_secure(self, client: Client, result_func, args, kwargs):
+    def test_secure(self, client: Client, result_func: Callable, args, kwargs):
         assert result_func(client.request(*args, **kwargs))

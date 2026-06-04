@@ -6,7 +6,7 @@ from uuid import UUID
 from pydantic import (BaseModel, ConfigDict, Field, EmailStr, ValidationInfo, SecretStr,
                       field_validator, AfterValidator, model_validator)
 
-from settings import password_hasher, get_utc_now
+from settings import settings, get_utc_now
 
 
 _name_field = partial(Field, min_length=1, max_length=50)
@@ -38,7 +38,7 @@ class Error(BaseModel):
 
 # Checkers
 class _UserCheck:
-    @field_validator("firstname", "lastname", "surname", mode="after")  # noqa pycharm linter bug
+    @field_validator("firstname", "lastname", "surname", mode="after")
     @classmethod
     def title(cls, value: str | None) -> str | None:
         if value:
@@ -53,7 +53,7 @@ def _check_and_hash_password(field_name: str) -> Callable[[str, ValidationInfo],
         if (password := info.data.get(field_name)) and confirm_password:
             if password != confirm_password:
                 raise ValueError('Passwords do not match!')
-            return password_hasher.hash(password.get_secret_value())  # noqa pycharm linter bug
+            return settings.password_hasher.hash(password.get_secret_value())
         return confirm_password
     return wrapper
 
@@ -103,7 +103,7 @@ class UpdateUserForm(OrmSchema, _UserCheck):
     hashed_password: Annotated[SecretStr, _pass_field(None, alias='confirm_new_password'),
                                AfterValidator(_check_and_hash_password('new_password'))]
 
-    @model_validator(mode='after')  # noqa pycharm linter bug
+    @model_validator(mode='after')
     def check_passwords_filled(self):
         if any(pair := (self.new_password, self.hashed_password)) and not all(pair):
             raise ValueError("Fields new_password and confirm_new_password must be both or none")

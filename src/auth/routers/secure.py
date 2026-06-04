@@ -33,7 +33,7 @@ async def assign_role(db: DBDep, role: str, user: UUID | EmailStr):
     if not (role_db := await get_role_db(db, role)):
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Role not found")
 
-    user_db.roles.append(role_db)  # noqa sqlalchemy Mapped linter bug
+    user_db.roles.append(role_db)
     await db.flush()
 
     return Message(message=f"Role {role} successfully assigned to user {user}")

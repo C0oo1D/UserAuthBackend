@@ -8,13 +8,13 @@ from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, Asyn
 from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
 
 from models import TableBase, PermissionDB, RoleDB, UserDB
-from settings import db_url, db_echo, add_test_data, drop_db_at_start, password_hasher
+from settings import settings
 
 
 logger = getLogger(__name__)
 
 
-engine = create_async_engine(db_url, echo=db_echo)
+engine = create_async_engine(settings.db_url.get_secret_value(), echo=settings.db_echo)
 db_maker = async_sessionmaker(engine, autoflush=False)
 
 
@@ -31,7 +31,7 @@ def get_test_data():
     r_mod = RoleDB(name='Moderator', description='Can see permissions')
     r_mod.permissions.append(p_gr)
 
-    hasher = password_hasher.hash
+    hasher = settings.password_hasher.hash
 
     u_su = UserDB(email='admin@example.com', firstname='Admin', is_superuser=True,
                   hashed_password=hasher('su_password'))
@@ -52,11 +52,11 @@ def get_test_data():
 
 async def create_db_lifespan(_):
     async with engine.begin() as conn:
-        if drop_db_at_start:
+        if settings.drop_db_at_start:
             await conn.run_sync(TableBase.metadata.drop_all)
         await conn.run_sync(TableBase.metadata.create_all)
 
-    if add_test_data:
+    if settings.add_test_data:
         try:
             async with db_maker.begin() as session:
                 session.add_all(get_test_data())
@@ -72,7 +72,8 @@ def _create_db_middleware():
         """todo: add __init__ with params"""
         async def dispatch(self, request: Request, call_next: RequestResponseEndpoint) -> Response:
             exit_stack = AsyncExitStack()
-            request.scope |= {'db_exit_stack': exit_stack, 'db': None}
+            request.scope['db_exit_stack'] = exit_stack
+            request.scope['db'] = None
 
             try:
                 response = await call_next(request)

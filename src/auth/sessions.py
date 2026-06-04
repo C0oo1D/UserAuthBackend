@@ -9,13 +9,13 @@ from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoin
 from crud import get_session_db, update_session_db, delete_session_db, get_user_db
 from database import get_db
 from schemas import CacheItem, User, Session
-from settings import get_utc_now, session_cache_expire, session_expire, secure_cookie
+from settings import settings, get_utc_now
 
 
 logger = getLogger(__name__)
 
 _cookie_name = 'session_id'
-_del_cookie_params = {'httponly': True, 'secure': secure_cookie, 'samesite': "strict"}
+_del_cookie_params = {'httponly': True, 'secure': settings.secure_cookie, 'samesite': "strict"}
 _set_cookie_params = _del_cookie_params | {'max_age': int(timedelta(days=365).total_seconds())}
 
 
@@ -74,7 +74,7 @@ def _create_session_middleware():
         def process_cache():
             """Handling LRU cache items in reversed order by its validity time"""
             for session_id, item in dict(cache).items():
-                if is_valid(item.session.updated_at, session_cache_expire):
+                if is_valid(item.session.updated_at, settings.session_cache_expire):
                     break
                 cache.pop(session_id)
 
@@ -95,13 +95,13 @@ def _create_session_middleware():
             if not (session_db := await get_session_db(db, session_id := UUID(session_id_str))):
                 return False
 
-            if not (now := is_valid(session_db.updated_at, session_expire)):  # noqa sqlalchemy Mapped linter bug
+            if not (now := is_valid(session_db.updated_at, settings.session_expire)):
                 await delete_session_db(db, session_id)
                 return False
 
             await update_session_db(db, session_db, now)
 
-            if not (user_db := await get_user_db(db, session_db.user_id)):  # noqa sqlalchemy Mapped linter bug
+            if not (user_db := await get_user_db(db, session_db.user_id)):
                 logger.error(f"{session_db=!r} has no valid user, deleting session")
                 await delete_session_db(db, session_id)
                 return False
@@ -127,7 +127,7 @@ def get_user(request: Request) -> User:
 
 def get_session(request: Request) -> Session:
     if session := request.session:
-        return tuple(session.values())[0]  # noqa pycharm linter bug
+        return next(iter(session.values()))
     raise HTTPException(status.HTTP_401_UNAUTHORIZED)
 
 

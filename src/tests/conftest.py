@@ -9,10 +9,10 @@ from uvicorn import Server, Config
 from database import get_test_data
 from main import app
 from models import TableBase
-from settings import db_url
+from settings import settings
 
 
-db_engine = create_engine(db_url.replace('+asyncpg', '', 1))
+db_engine = create_engine(settings.db_url.get_secret_value().replace('+asyncpg', '', 1))
 _base_url = "http://127.0.0.1:80"
 
 
