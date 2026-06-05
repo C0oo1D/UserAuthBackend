@@ -3,20 +3,19 @@ from logging import getLogger
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import Request, Response, Depends, HTTPException, status
+from fastapi import Depends, HTTPException, Request, Response, status
 from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
 
-from crud import get_session_db, update_session_db, delete_session_db, get_user_db
+from crud import delete_session_db, get_session_db, get_user_db, update_session_db
 from database import get_db
-from schemas import CacheItem, User, Session
-from settings import settings, get_utc_now
-
+from schemas import CacheItem, Session, User
+from settings import get_utc_now, settings
 
 logger = getLogger(__name__)
 
-_cookie_name = 'session_id'
-_del_cookie_params = {'httponly': True, 'secure': settings.secure_cookie, 'samesite': "strict"}
-_set_cookie_params = _del_cookie_params | {'max_age': int(timedelta(days=365).total_seconds())}
+_cookie_name = "session_id"
+_del_cookie_params = {"httponly": True, "secure": settings.secure_cookie, "samesite": "strict"}
+_set_cookie_params = _del_cookie_params | {"max_age": int(timedelta(days=365).total_seconds())}
 
 
 def is_valid(item: datetime, expire: timedelta) -> datetime | None:
@@ -31,16 +30,17 @@ def del_cookie(response: Response):
     response.delete_cookie(_cookie_name, **_del_cookie_params)
 
 
-def _create_session_middleware():
+def _create_session_middleware():  # noqa: C901 must be simplified
     """Create function wrapper needed only for linter passing, some FastAPI undocumented issue?
     todo: combine with starlette AuthenticationBackend and sessions for correct usage
     todo: cache cleaner must be realized through background tasks"""
+
     class Cache(dict[str, CacheItem]):
         def delete_session(self, session: Session):
             try:
                 self.pop(str(session.id))
-            except KeyError:
-                raise KeyError(f'Cannot find {str(session.id)} in cache, but it must be')
+            except KeyError as exc:
+                raise KeyError(f"Cannot find {session.id!s} in cache, but it must be") from exc
 
         def update_user(self, user: User):
             user_id = user.id
@@ -54,11 +54,10 @@ def _create_session_middleware():
                 if v.user.id == user_id:
                     del self[k]
 
-
     class _SessionMiddleware(BaseHTTPMiddleware):
         async def dispatch(self, request: Request, call_next: RequestResponseEndpoint) -> Response:
             # Fill user and session in request
-            request.scope |= {'user': None, 'session': {}}
+            request.scope |= {"user": None, "session": {}}
             self.process_cache()
             delete_cookie = not await self.process_session(request)
 
@@ -102,18 +101,18 @@ def _create_session_middleware():
             await update_session_db(db, session_db, now)
 
             if not (user_db := await get_user_db(db, session_db.user_id)):
-                logger.error(f"{session_db=!r} has no valid user, deleting session")
+                logger.error(f"Session {session_db.id=!r} has no valid user, deleting session")
                 await delete_session_db(db, session_id)
                 return False
 
             if not user_db.is_active:
-                logger.error(f"{user_db=!r} was suspended, deleting session")
+                logger.error(f"User {user_db.id=!r} was suspended, deleting session")
                 await delete_session_db(db, session_id)
                 return False
 
             user, session = User.model_validate(user_db), Session.model_validate(session_db)
             cache[session_id_str] = CacheItem(user=user, session=session)
-            request.scope |= {'user': user, 'session': {session_id_str: session}}
+            request.scope |= {"user": user, "session": {session_id_str: session}}
             return True
 
     return Cache(), _SessionMiddleware

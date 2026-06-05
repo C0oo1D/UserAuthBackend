@@ -28,7 +28,7 @@ class Settings(BaseSettings):
     @field_validator("*", mode="before")
     @classmethod
     def parse_kw(cls, value, info: ValidationInfo):
-        field_name: str = info.field_name
+        field_name = str(info.field_name)  # Attached to model fields, there is no None possible
         field = cls.__pydantic_fields__[field_name]
         if (alias := field.alias) and alias.endswith("_kw") and not field_name.endswith("_kw"):
             value = field.annotation(**value)

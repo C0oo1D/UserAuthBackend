@@ -1,18 +1,25 @@
-from fastapi import APIRouter, Request, Response, HTTPException, status
+from fastapi import APIRouter, HTTPException, Request, Response, status
 from pydantic import EmailStr, SecretStr
 
-from crud import (get_user_db, create_user_db, create_session_db, update_user_db, suspend_user_db,
-                  delete_sessions_db, authenticate_user_db, delete_session_db)
+from crud import (
+    authenticate_user_db,
+    create_session_db,
+    create_user_db,
+    delete_session_db,
+    delete_sessions_db,
+    get_user_db,
+    suspend_user_db,
+    update_user_db,
+)
 from database import DBDep
-from schemas import Message, RegisterUserForm, UpdateUserForm, UserInfo, User
 from routers import fmt_errors
-from sessions import UserDep, SessionDep, set_cookie, del_cookie, cache
+from schemas import Message, RegisterUserForm, UpdateUserForm, User, UserInfo
+from sessions import SessionDep, UserDep, cache, del_cookie, set_cookie
+
+router = APIRouter(prefix="/user")
 
 
-router = APIRouter(prefix='/user')
-
-
-@router.post("/register", tags=['User'], response_model=Message, responses=fmt_errors(409))
+@router.post("/register", tags=["User"], response_model=Message, responses=fmt_errors(409))
 async def register(request: Request, response: Response, db: DBDep, form: RegisterUserForm):
     """Register user"""
     if request.user:
@@ -27,21 +34,21 @@ async def register(request: Request, response: Response, db: DBDep, form: Regist
     return Message(message="User registration successful")
 
 
-@router.patch("/update", tags=['User'], response_model=Message)
+@router.patch("/update", tags=["User"], response_model=Message)
 async def update(db: DBDep, user: UserDep, form: UpdateUserForm):
     """Update user"""
-    if not (user_db := await authenticate_user_db(db, user.email,
-                                                  form.password.get_secret_value())):
+    user_db = await authenticate_user_db(db, user.email, form.password.get_secret_value())
+    if not user_db:
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Wrong password")
 
     exists = user.model_dump()
     new = form.model_dump()
-    if not new.get('hashed_password'):
-        new.pop('hashed_password', None)
+    if not new.get("hashed_password"):
+        new.pop("hashed_password", None)
     if not (changes := {k: v for k, v in new.items() if exists[k] != v}):
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "There is nothing to change")
 
-    if (email := changes.get('email')) and await get_user_db(db, email):
+    if (email := changes.get("email", "")) and await get_user_db(db, email):
         raise HTTPException(status.HTTP_409_CONFLICT, "Email already registered")
 
     await update_user_db(db, user.id, **changes)
@@ -49,7 +56,7 @@ async def update(db: DBDep, user: UserDep, form: UpdateUserForm):
     return Message(message="User update successful")
 
 
-@router.delete("/suspend", tags=['User'], response_model=Message, responses=fmt_errors(401))
+@router.delete("/suspend", tags=["User"], response_model=Message, responses=fmt_errors(401))
 async def suspend(password: SecretStr, response: Response, db: DBDep, user: UserDep):
     """Suspend user"""
     if not (user_db := await authenticate_user_db(db, user.email, password.get_secret_value())):
@@ -63,21 +70,22 @@ async def suspend(password: SecretStr, response: Response, db: DBDep, user: User
     return Message(message="User suspend successful")
 
 
-@router.post("/login", tags=['Auth'], response_model=Message, responses=fmt_errors(403, 409))
-async def login(email: EmailStr, password: SecretStr, request: Request, response: Response,
-                     db: DBDep):
+@router.post("/login", tags=["Auth"], response_model=Message, responses=fmt_errors(403, 409))
+async def login(
+    email: EmailStr, password: SecretStr, request: Request, response: Response, db: DBDep
+):
     """Login user"""
     if not (user_db := await authenticate_user_db(db, str(email), password.get_secret_value())):
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Wrong email or password")
     if not user_db.is_active:
         raise HTTPException(status.HTTP_409_CONFLICT, "User is suspended")
 
-    session = await create_session_db(db, user_db.id, request.headers.get("user-agent"))
+    session = await create_session_db(db, user_db.id, request.headers.get("user-agent", ""))
     set_cookie(response, str(session.id))
     return Message(message="User login successful")
 
 
-@router.post("/logout", tags=['Auth'], response_model=Message, responses=fmt_errors(409))
+@router.post("/logout", tags=["Auth"], response_model=Message, responses=fmt_errors(409))
 async def logout(response: Response, db: DBDep, session: SessionDep):
     """Logout user"""
     await delete_session_db(db, session.id)
@@ -86,9 +94,7 @@ async def logout(response: Response, db: DBDep, session: SessionDep):
     return Message(message="User logout successful")
 
 
-@router.get("", tags=['Profile'], response_model=UserInfo, responses=fmt_errors(401))
+@router.get("", tags=["Profile"], response_model=UserInfo, responses=fmt_errors(401))
 async def show(user: UserDep):
     """Show current user profile"""
     return user.get_info()
-
-

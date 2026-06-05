@@ -1,7 +1,7 @@
 from datetime import datetime
 from uuid import UUID, uuid4
 
-from sqlalchemy import Table, Column, ForeignKey, DateTime
+from sqlalchemy import Column, DateTime, ForeignKey, Table
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 from settings import get_utc_now
@@ -42,8 +42,9 @@ class UserDB(TableBase):
     hashed_password: Mapped[str]
 
     roles: Mapped[list["RoleDB"]] = relationship(secondary=user_roles, back_populates="users")
-    sessions: Mapped[list["SessionDB"]] = relationship(back_populates="user",
-                                                       cascade="all, delete-orphan")
+    sessions: Mapped[list["SessionDB"]] = relationship(
+        back_populates="user", cascade="all, delete-orphan"
+    )
 
 
 class SessionDB(TableBase):
@@ -65,8 +66,9 @@ class RoleDB(TableBase):
     description: Mapped[str | None]
 
     users: Mapped[list["UserDB"]] = relationship(secondary=user_roles, back_populates="roles")
-    permissions: Mapped[list["PermissionDB"]] = relationship(secondary=role_permissions,
-                                                             back_populates="roles")
+    permissions: Mapped[list["PermissionDB"]] = relationship(
+        secondary=role_permissions, back_populates="roles"
+    )
 
 
 class PermissionDB(TableBase):
@@ -77,5 +79,6 @@ class PermissionDB(TableBase):
     codename: Mapped[str] = mapped_column(unique=True)
     description: Mapped[str | None]
 
-    roles: Mapped[list["RoleDB"]] = relationship(secondary=role_permissions,
-                                                 back_populates="permissions")
+    roles: Mapped[list["RoleDB"]] = relationship(
+        secondary=role_permissions, back_populates="permissions"
+    )

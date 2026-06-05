@@ -6,6 +6,7 @@
 - Secure cookies used for authorization and authentication (stored session UUID, cannot be captured by JS)
 - Role-based access control (RBAC) for access to most secure routes based on permissions in roles that user have
 - DB field is_superuser in UserDB class for all resources access (including those that cannot be accessed by any RBAC role)
+- Using Ruff linter and formatter as pre-commit hook
 
 ### Getting uv
 Details: https://docs.astral.sh/uv/getting-started/installation/
@@ -48,10 +49,16 @@ Endpoints OpenAPI docs available at http://127.0.0.1/docs during run
 uv run pytest
 ```
 
+### Checking linter rules and formatting files
+
+```sh
+uv run ruff check
+uv run ruff format
+```
+
 ### Note
-- This is a simple project, completed in 7 days - tests is not full, and must be expanded
+- This is a simple project, completed in 7 days (first commit) - tests is not full, and must be expanded
 - Tests covers all main functionality
 - Used dict cache must be changed to Redis
-- Used settings must be changed to pydantic-settings
 - Code coverage report is available after running test
 - There is existed, but not used user-agent in session due to time limit (working example available in a neighboring project [Skazo4nik](https://github.com/C0oo1D/Skazo4nik) on GitHub)

@@ -1,29 +1,31 @@
+from collections.abc import Sequence
 from datetime import datetime
 from logging import getLogger
-from typing import overload, Sequence
+from typing import overload
 from uuid import UUID
 
 from argon2.exceptions import VerifyMismatchError
-from sqlalchemy import select, func, update, delete
+from sqlalchemy import delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import InstrumentedAttribute as Col, joinedload
+from sqlalchemy.orm import InstrumentedAttribute as Col
+from sqlalchemy.orm import joinedload
 
-from models import TableBase, SessionDB, UserDB, RoleDB
+from models import RoleDB, SessionDB, TableBase, UserDB
 from schemas import RegisterUserForm
-from settings import settings, get_utc_now
-
+from settings import get_utc_now, settings
 
 logger = getLogger(__name__)
 
 
 # Helper functions
+# noinspection PyUnreachableCode
 def _is_table(var: UUID | TableBase) -> bool:
     match var:
         case UUID():
             return False
         case TableBase():
             return True
-    logger.error(msg := f'Wrong uuid/table parameter provided: {var!r} ({type(var)})')
+    logger.error(msg := f"Wrong uuid/table parameter provided: {var!r} ({type(var)})")
     raise ValueError(msg)
 
 
@@ -34,18 +36,20 @@ async def _create[T: TableBase](db: AsyncSession, row: T) -> T:
     return row
 
 
-async def create_user_db(db: AsyncSession, user_form: RegisterUserForm, is_superuser=False
-                         ) -> UserDB:
+async def create_user_db(
+    db: AsyncSession, user_form: RegisterUserForm, *, is_superuser: bool = False
+) -> UserDB:
     return await _create(db, UserDB(**user_form.model_dump(), is_superuser=is_superuser))
 
 
 async def create_session_db(db: AsyncSession, user_id: UUID, user_agent: str) -> SessionDB:
-    return await _create((kw := locals()).pop('db'), SessionDB(**kw))
+    return await _create((kw := locals()).pop("db"), SessionDB(**kw))
 
 
 # Read single operations
-async def _get_one[T: TableBase](db: AsyncSession, table: type[T] | Col, where, options=None,
-                                 unique: bool = False) -> T | None:
+async def _get_one[T: TableBase](
+    db: AsyncSession, table: type[T] | Col, where, options=None, *, unique: bool = False
+) -> T | None:
     stmt = select(table).where(where)
     if options:
         stmt = stmt.options(options)
@@ -58,23 +62,28 @@ async def _get_one[T: TableBase](db: AsyncSession, table: type[T] | Col, where, 
 
 
 @overload
-async def get_user_db(db: AsyncSession, email: str, *, roles=False, permissions=False
-                      ) -> UserDB | None: ...
+async def get_user_db(
+    db: AsyncSession, email: str, *, with_roles=False, with_permissions=False
+) -> UserDB | None: ...
 @overload
-async def get_user_db(db: AsyncSession, user_id: UUID, *, roles=False, permissions=False
-                      ) -> UserDB | None: ...
-async def get_user_db(db: AsyncSession, var: UUID | str, *, roles=False, permissions=False
-                      ) -> UserDB | None:
+async def get_user_db(
+    db: AsyncSession, user_id: UUID, *, with_roles=False, with_permissions=False
+) -> UserDB | None: ...
+async def get_user_db(
+    db: AsyncSession, var: UUID | str, *, with_roles=False, with_permissions=False
+) -> UserDB | None:
     field = UserDB.id if isinstance(var, UUID) else UserDB.email
     kwargs = {}
-    match roles, permissions:
+    match with_roles, with_permissions:
         case True, True:
-            kwargs = {'options': joinedload(UserDB.roles).joinedload(RoleDB.permissions),
-                      'unique': True}
+            kwargs = {
+                "options": joinedload(UserDB.roles).joinedload(RoleDB.permissions),
+                "unique": True,
+            }
         case True, False:
-            kwargs = {'options': joinedload(UserDB.roles), 'unique': True}
+            kwargs = {"options": joinedload(UserDB.roles), "unique": True}
         case False, True:
-            raise ValueError('Cannot load permissions in UserDB without roles')
+            raise ValueError("Cannot load permissions in UserDB without roles")
     return await _get_one(db, UserDB, field == var, **kwargs)
 
 
@@ -83,26 +92,51 @@ async def get_session_db(db: AsyncSession, session_id: UUID) -> SessionDB | None
 
 
 async def get_count_db(db: AsyncSession, table: type[TableBase]) -> int:
+    # noinspection PyTypeChecker
     return await db.scalar(select(func.count()).select_from(table))
 
 
-async def get_role_db(db: AsyncSession, name: str, *, permissions=False) -> RoleDB | None:
-    options = joinedload(RoleDB.permissions) if permissions else None
+async def get_role_db(db: AsyncSession, name: str, *, with_permissions=False) -> RoleDB | None:
+    options = joinedload(RoleDB.permissions) if with_permissions else None
     return await _get_one(db, RoleDB, RoleDB.name == name, options=options)
 
 
 # Read multiple operations
 @overload
-async def _get_many[T: TableBase, C](db: AsyncSession, table_col: type[T], where=None, *,
-                                     order_by=None, options=None, offset: int = 0, limit: int = 10,
-                                     unique: bool = False) -> Sequence[T]: ...
+async def _get_many[T: TableBase, C](
+    db: AsyncSession,
+    table_col: type[T],
+    where=None,
+    *,
+    order_by=None,
+    options=None,
+    offset: int = 0,
+    limit: int = 10,
+    unique: bool = False,
+) -> Sequence[T]: ...
 @overload
-async def _get_many[T: TableBase, C](db: AsyncSession, table_col: Col[C], where=None, *,
-                                     order_by=None, options=None, offset: int = 0, limit: int = 10,
-                                     unique: bool = False) -> Sequence[C]: ...
-async def _get_many[T: TableBase, C](db: AsyncSession, table_col: type[T] | Col[C], where=None, *,
-                                     order_by=None, options=None, offset: int = 0, limit: int = 10,
-                                     unique: bool = False) -> Sequence[T] | Sequence[C]:
+async def _get_many[T: TableBase, C](
+    db: AsyncSession,
+    table_col: Col[C],
+    where=None,
+    *,
+    order_by=None,
+    options=None,
+    offset: int = 0,
+    limit: int = 10,
+    unique: bool = False,
+) -> Sequence[C]: ...
+async def _get_many[T: TableBase, C](
+    db: AsyncSession,
+    table_col: type[T] | Col[C],
+    where=None,
+    *,
+    order_by=None,
+    options=None,
+    offset: int = 0,
+    limit: int = 10,
+    unique: bool = False,
+) -> Sequence[T] | Sequence[C]:
     stmt = select(table_col)
     if order_by is not None:
         stmt = stmt.order_by(order_by)
@@ -122,8 +156,8 @@ async def _get_many[T: TableBase, C](db: AsyncSession, table_col: type[T] | Col[
     return result.scalars().all()
 
 
-async def get_roles_db(db: AsyncSession, *, permissions=False, **kwargs):
-    if permissions:
+async def get_roles_db(db: AsyncSession, *, with_permissions=False, **kwargs):
+    if with_permissions:
         if "options" in kwargs or "unique" in kwargs:
             raise ValueError("Cannot use options or unique when permissions used")
         kwargs |= {"options": joinedload(RoleDB.permissions), "unique": True}
@@ -137,15 +171,18 @@ async def update_user_db(db: AsyncSession, user_id: UUID, **kwargs):
 
 
 @overload
-async def update_session_db(db: AsyncSession, session_id: UUID, updated_at: datetime, **kwargs): ...
+async def update_session_db(
+    db: AsyncSession, session_id: UUID, updated_at: datetime, **kwargs
+): ...
 @overload
 async def update_session_db(db: AsyncSession, session: SessionDB, updated_at: datetime): ...
-async def update_session_db(db: AsyncSession, var: UUID | SessionDB,
-                            updated_at: datetime | None = None, **kwargs):
+async def update_session_db(
+    db: AsyncSession, var: UUID | SessionDB, updated_at: datetime | None = None, **kwargs
+):
     if _is_table(var):
         var.updated_at = updated_at or get_utc_now()
     else:
-        kwargs |= {'updated_at': updated_at or get_utc_now()}
+        kwargs |= {"updated_at": updated_at or get_utc_now()}
         await db.execute(update(SessionDB).where(SessionDB.id == var).values(**kwargs))
     await db.flush()
 
@@ -174,19 +211,19 @@ def _check_password(hashed_password: str, password: str) -> str | None:
         password_hasher.verify(hashed_password, password)
         if password_hasher.check_needs_rehash(hashed_password):
             return password_hasher.hash(password)
-        return ''
+        return ""
     except VerifyMismatchError:
         return None
 
 
 async def authenticate_user_db(db: AsyncSession, email: str, password: str) -> UserDB | None:
-    if user := await get_user_db(db, email):
-        if (rehashed := _check_password(str(user.hashed_password), password)) is not None:
-            if rehashed:
-                user.hashed_password = rehashed
-                await db.flush()
-                logger.info(f'Rehashed {user} password')
-            return user
+    user = await get_user_db(db, email)
+    if user and (rehashed := _check_password(str(user.hashed_password), password)) is not None:
+        if rehashed:
+            user.hashed_password = rehashed
+            await db.flush()
+            logger.info(f"Rehashed user {user.id!r} password")
+        return user
     return None
 
 

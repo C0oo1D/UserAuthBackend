@@ -1,6 +1,6 @@
 [project]
 name = "userauthbackend"
-version = "0.1.1"
+version = "0.1.2"
 description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.13"
@@ -18,9 +18,11 @@ dependencies = [
 dev = [
     "gevent>=26.4.0",
     "httpx>=0.28.1",
+    "pre-commit>=4.6.0",
     "psycopg2>=2.9.12",
     "pytest>=9.0.3",
     "pytest-cov>=7.1.0",
+    "ruff>=0.15.16",
     "uvicorn>=0.46.0",
 ]
 
@@ -30,3 +32,55 @@ addopts = ["-v", "--import-mode=importlib", "--cov=src/auth", "--cov-branch", "-
 
 [tool.coverage.run]
 concurrency = ["thread", "gevent"]
+
+[tool.ruff]
+line-length = 99
+src = ["src/*"]
+
+[tool.ruff.lint]
+select = [
+    "ERA",      # eradicate
+    "FAST",     # FastAPI
+    "ASYNC",    # flake8-async
+    "S",        # flake8-bandit
+    "BLE",      # flake8-blind-except
+    "FBT",      # flake8-boolean-trap
+    "B",        # flake8-bugbear
+    "A",        # flake8-builtins
+    "C4",       # flake8-comprehensions
+    "DTZ",      # flake8-datetimez
+    "T10",      # flake8-debugger
+    "FA",       # flake8-future-annotations
+    "INT",      # flake8-gettext
+    "ISC",      # flake8-implicit-str-concat
+    "ICN",      # flake8-import-conventions
+    "LOG",      # flake8-logging
+    "PIE",      # flake8-pie
+    "T20",      # flake8-print
+    "PT",       # flake8-pytest-style
+    "Q",        # flake8-quotes
+    "RSE",      # flake8-raise
+    "RET",      # flake8-return
+    "SLF",      # flake8-self
+    "SIM",      # flake8-simplify
+    "SLOT",     # flake8-slots
+    "TID",      # flake8-tidy-imports
+    "TC",       # flake8-type-checking
+    "ARG",      # flake8-unused-arguments
+    "PTH",      # flake8-use-pathlib
+    "FLY",      # flynt
+    "I",        # isort
+    "C90",      # mccabe
+    "N",        # pep8-naming
+    "PERF",     # Perflint
+    "E",        # pycodestyle-errors
+    "W",        # pycodestyle-warnings
+    "F",        # Pyflakes
+    "PGH",      # pygrep-hooks
+    "UP",       # pyupgrade
+    "FURB",     # refurb
+    "RUF"       # Ruff
+]
+fixable = [
+    "I"         # isort
+]
