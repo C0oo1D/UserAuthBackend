@@ -11,8 +11,8 @@ from main import app
 from models import TableBase
 from settings import settings
 
-db_engine = create_engine(settings.db_url.get_secret_value().replace("+asyncpg", "", 1))
-_base_url = "http://127.0.0.1:80"
+db_engine = create_engine(settings.postgres.test_url)
+_base_url = f"http://{settings.host}:{settings.port}"
 
 
 @pytest.fixture(scope="session")

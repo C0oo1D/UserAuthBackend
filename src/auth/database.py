@@ -1,9 +1,11 @@
-from contextlib import AsyncExitStack
+from contextlib import AsyncExitStack, suppress
 from logging import getLogger
 from typing import Annotated
 
+from asyncpg import ConnectionDoesNotExistError, InvalidAuthorizationSpecificationError
 from fastapi import Depends, Request, Response
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy import text
+from sqlalchemy.exc import IntegrityError, ProgrammingError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
 
@@ -13,7 +15,7 @@ from settings import settings
 logger = getLogger(__name__)
 
 
-engine = create_async_engine(settings.db_url.get_secret_value(), echo=settings.db_echo)
+engine = create_async_engine(settings.postgres.app_url, echo=settings.db_echo)
 db_maker = async_sessionmaker(engine, autoflush=False)
 
 
@@ -67,13 +69,45 @@ def get_test_data():
     return [p_gr, p_ar, r_adm, r_mod, u_su, u_adm, u_mod, u_std]
 
 
+async def _create_db_and_user():
+    logger.info("Creating database and owner (only if they do not exist)")
+    pg = settings.postgres
+    user = pg.app_user
+    password = pg.app_password.get_secret_value()
+    root_engine = create_async_engine(
+        pg.root_url, echo=settings.db_echo, isolation_level="AUTOCOMMIT"
+    )
+    try:
+        async with root_engine.begin() as root:
+            with suppress(ProgrammingError):
+                await root.execute(text(f"CREATE USER {user} WITH PASSWORD '{password}'"))
+                logger.info(f"Created {user!r} owner")
+            await root.execute(text(f"CREATE DATABASE {pg.db_name} OWNER {user}"))
+            logger.info(f"Created '{pg.db_name}' database")
+    except ConnectionDoesNotExistError as exc:
+        raise RuntimeError(f"Failed connect to {pg.root_url}, wrong admin password?") from exc
+
+
 async def create_db_lifespan(_):
-    async with engine.begin() as conn:
-        if settings.drop_db_at_start:
-            # noinspection PyTypeChecker
-            await conn.run_sync(TableBase.metadata.drop_all)
-        # noinspection PyTypeChecker
-        await conn.run_sync(TableBase.metadata.create_all)
+    """Create database, owner and tables (only if they do not exist)"""
+    for retry in range(2):
+        try:
+            async with engine.begin() as conn:
+                if settings.drop_db_at_start:
+                    await conn.run_sync(TableBase.metadata.drop_all)
+                await conn.run_sync(TableBase.metadata.create_all)
+            break
+
+        except (InvalidAuthorizationSpecificationError, ConnectionDoesNotExistError) as exc:
+            if retry:
+                raise RuntimeError("DB and it's USER must be created before retry") from exc
+            await _create_db_and_user()
+        except ConnectionRefusedError as exc:
+            raise RuntimeError(f"Cannot access {settings.postgres.app_url} db: {exc!r}") from None
+        except Exception as exc:
+            raise RuntimeError(f"Uncaptured exception: {exc!r}\n\t{type(exc).mro()=}") from exc
+    else:
+        raise RuntimeError("Unexpected database engine init route")
 
     if settings.add_test_data:
         try:

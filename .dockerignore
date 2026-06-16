@@ -10,6 +10,4 @@ __pycache__/
 
 # Explicitly include needed hidden files in root dir
 !/.python-version
-!/.gitignore
-!/.dockerignore
-!/.pre-commit-config.yaml
+!/.env

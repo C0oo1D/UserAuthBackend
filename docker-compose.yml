@@ -1,0 +1,29 @@
+services:
+  auth-app:
+    image: auth-app
+    pull_policy: never
+    build: .
+    environment:
+      - POSTGRES_HOSTS=["postgres"]
+      - HOST=0.0.0.0
+    ports:
+      - "80:80"
+    restart: unless-stopped
+    depends_on:
+      - postgres
+
+  postgres:
+    image: postgres:17
+    environment:
+      - POSTGRES_PASSWORD=$POSTGRES_PASSWORD
+    restart: unless-stopped
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U postgres" ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  postgres_data:

@@ -24,7 +24,7 @@ def run():
     from uvicorn import run
 
     logger.info("App is starting")
-    run(app, port=80)
+    run(app, host=settings.host, port=settings.port)
     logger.info("App is closed")
 
 

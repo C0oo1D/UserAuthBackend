@@ -7,6 +7,7 @@
 - Role-based access control (RBAC) for access to most secure routes based on permissions in roles that user have
 - DB field is_superuser in UserDB class for all resources access (including those that cannot be accessed by any RBAC role)
 - Using Ruff linter and formatter as pre-commit hook
+- Docker Compose available
 
 ### Getting uv
 Details: https://docs.astral.sh/uv/getting-started/installation/
@@ -21,40 +22,48 @@ uv sync
 
 #### Minimal .env file:
 ```env
-db_url=postgresql+asyncpg://user:password@localhost/db_name
+POSTGRES_PASSWORD=root_user_password
+POSTGRES_APP_PASSWORD=app_user_password
 ```
 #### Optimal .env file for tests:
 ```env
-db_url=postgresql+asyncpg://user:password@localhost/db_name
-secure_cookie=False
-drop_db_at_start=True
-add_test_data=True
+POSTGRES_PASSWORD=root_user_password
+POSTGRES_APP_PASSWORD=app_user_password
+SECURE_COOKIE=False
+DROP_DB_AT_START=True
+ADD_TEST_DATA=True
 ```
 Notes
-- db_url: database must be created before run
-- secure_cookie: must be disabled due to http connection, and must be removed when https configured
-- drop_db_at_start: recreates all tables
-- add_test_data: fill db with test users, roles and permissions (users/passwords in database.py (at lines 36-48))
+- POSTGRES_PASSWORD: used for creating database, creating its owner, and to start docker postgres image
+- POSTGRES_APP_PASSWORD: used for database access from app
+- SECURE_COOKIE: must be disabled due to http connection, and must be removed when https configured
+- DROP_DB_AT_START: recreates all tables
+- ADD_TEST_DATA: fill db with test users, roles and permissions (users/passwords in database.py (at lines 36-48))
 
 
 #### Run:
 ```sh
 uv run src/auth/main.py
 ```
-Endpoints OpenAPI docs available at http://127.0.0.1/docs during run
+Endpoints OpenAPI docs available at http://127.0.0.1/docs during run, host/port is configurable
 
 ### Testing
-
 ```sh
 uv run pytest
 ```
 
 ### Checking linter rules and formatting files
-
 ```sh
 uv run ruff check
 uv run ruff format
 ```
+
+### Alternative run in docker container (build once and run)
+```sh
+docker compose build
+docker compose up
+```
+
 
 ### Note
 - This is a simple project, completed in 7 days (first commit) - tests is not full, and must be expanded
