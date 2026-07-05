@@ -21,8 +21,7 @@ def permission(codename: str = "") -> Depends:
     async def check_permissions(db: DBDep, user: UserDep):
         if user.is_superuser:
             return
-        if not (user_db := await get_user_db(db, user.id, with_roles=True, with_permissions=True)):
-            raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, f"Cannot find {user.id}")
+        user_db = await get_user_db(db, user.id, with_roles=True, with_permissions=True)
         if _has_permission(user_db, codename):
             return
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Permission denied")

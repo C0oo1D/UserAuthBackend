@@ -25,10 +25,7 @@ async def admin(db: DBDep):
     "/role", tags=["Admin"], response_model=Message, dependencies=[permission("assign_roles")]
 )
 async def assign_role(db: DBDep, role: str, user: UUID | EmailStr):
-    # noinspection PyTypeChecker
-    if not (
-        user_db := await get_user_db(db, user, with_roles=True)
-    ):  # pycharm linter false-positive
+    if not (user_db := await get_user_db(db, user, with_roles=True)):
         raise HTTPException(status.HTTP_404_NOT_FOUND, "User not found")
 
     if role in [x.name for x in user_db.roles]:

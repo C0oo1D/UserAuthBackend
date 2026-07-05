@@ -4,18 +4,20 @@ services:
     pull_policy: never
     build: .
     environment:
-      - POSTGRES_HOSTS=["postgres"]
+      - POSTGRES_HOST=postgres
+      - REDIS_HOST=redis
       - HOST=0.0.0.0
     ports:
       - "80:80"
     restart: unless-stopped
     depends_on:
       - postgres
+      - redis
 
   postgres:
     image: postgres:17
     environment:
-      - POSTGRES_PASSWORD=$POSTGRES_PASSWORD
+      - POSTGRES_PASSWORD=$POSTGRES_ROOT_PASSWORD
     restart: unless-stopped
     volumes:
       - postgres_data:/var/lib/postgresql/data
@@ -24,6 +26,11 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+
+  redis:
+    image: redis:8
+    restart: unless-stopped
+
 
 volumes:
   postgres_data:

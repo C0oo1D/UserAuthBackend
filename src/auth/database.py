@@ -1,14 +1,15 @@
-from contextlib import AsyncExitStack, suppress
+from collections.abc import AsyncGenerator
+from contextlib import AsyncExitStack, asynccontextmanager, suppress
 from logging import getLogger
 from typing import Annotated
 
 from asyncpg import ConnectionDoesNotExistError, InvalidAuthorizationSpecificationError
-from fastapi import Depends, Request, Response
+from fastapi import Depends, Request
 from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError, ProgrammingError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
-from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
 
+from middleware import MiddlewareBase
 from models import PermissionDB, RoleDB, TableBase, UserDB
 from settings import settings
 
@@ -30,7 +31,7 @@ def get_test_data():
     )
 
     r_adm = RoleDB(
-        name="Administrator", description="Have all permissions, cannot access superuser endpoints"
+        name="Administrator", description="Has all permissions, cannot access superuser endpoints"
     )
     r_adm.permissions.extend((p_gr, p_ar))
 
@@ -72,8 +73,8 @@ def get_test_data():
 async def _create_db_and_user():
     logger.info("Creating database and owner (only if they do not exist)")
     pg = settings.postgres
-    user = pg.app_user
-    password = pg.app_password.get_secret_value()
+    user = pg.user
+    password = pg.password.get_secret_value()
     root_engine = create_async_engine(
         pg.root_url, echo=settings.db_echo, isolation_level="AUTOCOMMIT"
     )
@@ -82,12 +83,13 @@ async def _create_db_and_user():
             with suppress(ProgrammingError):
                 await root.execute(text(f"CREATE USER {user} WITH PASSWORD '{password}'"))
                 logger.info(f"Created {user!r} owner")
-            await root.execute(text(f"CREATE DATABASE {pg.db_name} OWNER {user}"))
-            logger.info(f"Created '{pg.db_name}' database")
+            await root.execute(text(f"CREATE DATABASE {pg.path} OWNER {user}"))
+            logger.info(f"Created '{pg.path}' database")
     except ConnectionDoesNotExistError as exc:
         raise RuntimeError(f"Failed connect to {pg.root_url}, wrong admin password?") from exc
 
 
+@asynccontextmanager
 async def create_db_lifespan(_):
     """Create database, owner and tables (only if they do not exist)"""
     for retry in range(2):
@@ -118,39 +120,28 @@ async def create_db_lifespan(_):
     yield
 
 
-def _create_db_middleware():
-    """Create function wrapper needed only for linter passing, some FastAPI undocumented issue?"""
+class DBMiddleware(MiddlewareBase):
+    _scope_names = ("db_exit_stack", "db")
 
-    class _DBMiddleware(BaseHTTPMiddleware):
-        """todo: add __init__ with params"""
-
-        async def dispatch(self, request: Request, call_next: RequestResponseEndpoint) -> Response:
-            exit_stack = AsyncExitStack()
-            request.scope["db_exit_stack"] = exit_stack
-            request.scope["db"] = None
-
-            try:
-                response = await call_next(request)
-            finally:
-                await exit_stack.aclose()
-            return response
-
-    return _DBMiddleware
+    async def handle(self, _) -> AsyncGenerator:
+        exit_stack = AsyncExitStack()
+        try:
+            yield exit_stack, None
+        finally:
+            await exit_stack.aclose()
+        yield
 
 
 async def get_db(request: Request) -> AsyncSession:
     """Get db only when called"""
-    scope = request.scope
-    if db := scope.get("db", ""):
+    if db := (scope := request.scope).get("db"):
         return db
 
-    if not (exit_stack := scope.get("db_exit_stack", "")):
-        raise RuntimeError("DB Middleware is not initialized!")
+    if exit_stack := scope.get("db_exit_stack"):
+        db = scope["db"] = await exit_stack.enter_async_context(db_maker.begin())
+        return db
 
-    db = scope["db"] = await exit_stack.enter_async_context(db_maker.begin())
-    return db
+    raise RuntimeError("DBMiddleware is not initialized!")
 
 
 DBDep = Annotated[AsyncSession, Depends(get_db)]  # Get db at route as dependency
-
-DBMiddleware = _create_db_middleware()

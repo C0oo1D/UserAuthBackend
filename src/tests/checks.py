@@ -1,18 +1,88 @@
 from collections.abc import Callable
+from contextlib import contextmanager, nullcontext
+from functools import partial
+from json import JSONDecodeError
+from re import escape
+from typing import Any
 
+import pytest
 from httpx import Response
 
 type CheckResult[T] = Callable[[T], bool]
 _sort_t = dict | list | tuple
 
 
-def check(equal, error_message: str = ""):
+def check(is_equal, error_message: str = ""):
     """Assert replacement in case of enabled optimizations"""
-    if not equal:
+    if not is_equal:
         raise AssertionError(error_message) if error_message else AssertionError
 
 
-def is_equal[T: Response](
+@contextmanager
+def check_exc(result, msg: str = ""):
+    raises_obj = None
+    if isinstance(result, type) and issubclass(result, Exception):
+        raises_obj = pytest.raises(result, match=escape(msg) or None)
+    elif isinstance(result, Exception):
+        raises_obj = pytest.raises(type(result), match=escape(result.args[0]))
+
+    with raises_obj or nullcontext() as context:
+        yield context
+
+
+def _fmt(
+    _header: tuple[str, str],
+    _lines: tuple[str, ...],
+    info: str,
+    name: str,
+    sep: str,
+    *args,
+    invert: bool,
+    **kwargs,
+) -> AssertionError:
+    if args or kwargs:
+        args = tuple(arg() if isinstance(arg, Callable) else arg for arg in args)
+        kwargs = {k: v() if isinstance(v, Callable) else v for k, v in kwargs.items()}
+        info = info.format(*args, **kwargs)
+    header = (f"{name[0].capitalize() + name[1:]} is " if name else "") + _header[invert]
+    return AssertionError(sep.join(line for line in (header, *_lines, info) if line))
+
+
+def equal(
+    expected: Any,
+    received: Any,
+    info: str = "",
+    *args,
+    invert: bool = False,
+    name: str = "",
+    sep: str = "\n\t",
+    **kwargs,
+) -> AssertionError | None:
+    if (expected == received) if invert else (expected != received):
+        _equal = ("not equal", "equal, but must not")
+        _lines = f"Expected: {expected!r}", f"Received: {received!r}"
+        return _fmt(_equal, _lines, info, name, sep, *args, invert=invert, **kwargs)
+    return None
+
+
+def inside(
+    item: Any,
+    items: Any,
+    info: str = "",
+    *args,
+    invert: bool = False,
+    name: str = "",
+    sep: str = "\n\t",
+    **kwargs,
+) -> AssertionError | None:
+    if (item in items) if invert else (item not in items):
+        _inside = ("not inside", "inside, but must not")
+        _lines = f"Item: {item!r}", f"Items: {items!r}"
+        return _fmt(_inside, _lines, info, name, sep, *args, invert=invert, **kwargs)
+    return None
+
+
+def equal_resp[T: Response](
     code: int = 0,
     json: dict | None = None,
     *,
@@ -21,26 +91,25 @@ def is_equal[T: Response](
 ) -> CheckResult[T]:
     """Response equality checker"""
 
-    def wrapper(response: T):
+    def try_json(resp: T):
+        try:
+            return resp.json()
+        except JSONDecodeError:
+            return repr(resp)
+
+    def wrapper(resp: T):
         if code:
-            r_code = response.status_code
-            check(
-                code == r_code,
-                f"Expected {code}, but received {r_code}\n\tResponse: {response.json()!r}",
-            )
+            arg = partial(try_json, resp)
+            equal(code, resp.status_code, "Response: {!r}", arg, name="Status code", sep=". ")
         if json is not None:
-            r_json = response.json()
-            if json_handler:
-                r_json = json_handler(r_json)
-            check(
-                json == r_json,
-                f"JSON responses is not equal\n\tExpected: {json!r}\n\tReceived: {r_json!r}",
-            )
+            r_json = resp.json()
+            r_json_handled = json_handler(r_json) if json_handler else r_json
+            equal(json, r_json_handled, "Received RAW: {!r}", r_json, name="JSON")
         if set_cookie is not None:
             if set_cookie:
-                check("set-cookie" in response.headers, "Cookie is not set, but must")
+                inside("set-cookie", resp.headers, name="Cookie")
             else:
-                check("set-cookie" not in response.headers, "Cookie is set, but must not")
+                inside("set-cookie", resp.headers, name="Cookie", invert=True)
         return True
 
     return wrapper
@@ -59,3 +128,7 @@ def sort_recursively[T: _sort_t](data: T, dict_key: str = "name") -> T:
     if isinstance(data, dict):
         return {k: sort_recursively(v) if isinstance(v, _sort_t) else v for k, v in data.items()}
     return data
+
+
+def msg_422(data: dict) -> dict:
+    return {"detail": [{"msg": data["detail"][0]["msg"]}]}

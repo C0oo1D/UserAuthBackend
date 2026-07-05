@@ -1,6 +1,7 @@
 from fastapi import APIRouter, HTTPException, Request, Response, status
 from pydantic import EmailStr, SecretStr
 
+from cache import CacheDep
 from crud import (
     authenticate_user_db,
     create_session_db,
@@ -11,31 +12,32 @@ from crud import (
     suspend_user_db,
     update_user_db,
 )
-from database import DBDep
+from database import DBDep, get_db
 from routers import fmt_errors
-from schemas import Message, RegisterUserForm, UpdateUserForm, User, UserInfo
-from sessions import SessionDep, UserDep, cache, del_cookie, set_cookie
+from schemas import Message, RegisterUserForm, Session, UpdateUserForm, User, UserInfo
+from sessions import SessionDep, UserDep, del_cookie, set_cookie
 
 router = APIRouter(prefix="/user")
 
 
 @router.post("/register", tags=["User"], response_model=Message, responses=fmt_errors(409))
-async def register(request: Request, response: Response, db: DBDep, form: RegisterUserForm):
+async def register(request: Request, response: Response, cache: CacheDep, form: RegisterUserForm):
     """Register user"""
     if request.user:
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Cannot register user when login completed")
 
-    if await get_user_db(db, str(form.email)):
+    if await get_user_db(db := await get_db(request), str(form.email)):
         raise HTTPException(status.HTTP_409_CONFLICT, "Email already registered")
 
-    user = await create_user_db(db, form)
-    session = await create_session_db(db, user.id, request.headers.get("user-agent", ""))
+    user_db = await create_user_db(db, form)
+    session_db = await create_session_db(db, user_db.id, request.headers.get("user-agent", ""))
+    await cache.set(session := Session.from_db(session_db, user_db))
     set_cookie(response, str(session.id))
     return Message(message="User registration successful")
 
 
 @router.patch("/update", tags=["User"], response_model=Message)
-async def update(db: DBDep, user: UserDep, form: UpdateUserForm):
+async def update(db: DBDep, user: UserDep, cache: CacheDep, form: UpdateUserForm):
     """Update user"""
     user_db = await authenticate_user_db(db, user.email, form.password.get_secret_value())
     if not user_db:
@@ -48,31 +50,37 @@ async def update(db: DBDep, user: UserDep, form: UpdateUserForm):
     if not (changes := {k: v for k, v in new.items() if exists[k] != v}):
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "There is nothing to change")
 
-    if (email := changes.get("email", "")) and await get_user_db(db, email):
+    if (email := changes.get("email")) and await get_user_db(db, email):
         raise HTTPException(status.HTTP_409_CONFLICT, "Email already registered")
 
     await update_user_db(db, user.id, **changes)
-    cache.update_user(User.model_validate(user_db))
+    await cache.update_user(User.model_validate(user_db))
     return Message(message="User update successful")
 
 
 @router.delete("/suspend", tags=["User"], response_model=Message, responses=fmt_errors(401))
-async def suspend(password: SecretStr, response: Response, db: DBDep, user: UserDep):
+async def suspend(
+    password: SecretStr, response: Response, db: DBDep, user: UserDep, cache: CacheDep
+):
     """Suspend user"""
     if not (user_db := await authenticate_user_db(db, user.email, password.get_secret_value())):
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Wrong password")
 
     await suspend_user_db(db, user_db)
     await delete_sessions_db(db, user.id)
-
+    await cache.delete_user(user)
     del_cookie(response)
-    cache.delete_user(user)
     return Message(message="User suspend successful")
 
 
 @router.post("/login", tags=["Auth"], response_model=Message, responses=fmt_errors(403, 409))
 async def login(
-    email: EmailStr, password: SecretStr, request: Request, response: Response, db: DBDep
+    email: EmailStr,
+    password: SecretStr,
+    request: Request,
+    response: Response,
+    db: DBDep,
+    cache: CacheDep,
 ):
     """Login user"""
     if not (user_db := await authenticate_user_db(db, str(email), password.get_secret_value())):
@@ -80,17 +88,18 @@ async def login(
     if not user_db.is_active:
         raise HTTPException(status.HTTP_409_CONFLICT, "User is suspended")
 
-    session = await create_session_db(db, user_db.id, request.headers.get("user-agent", ""))
+    session_db = await create_session_db(db, user_db.id, request.headers.get("user-agent", ""))
+    await cache.set(session := Session.from_db(session_db, user_db))
     set_cookie(response, str(session.id))
     return Message(message="User login successful")
 
 
 @router.post("/logout", tags=["Auth"], response_model=Message, responses=fmt_errors(409))
-async def logout(response: Response, db: DBDep, session: SessionDep):
+async def logout(response: Response, db: DBDep, session: SessionDep, cache: CacheDep):
     """Logout user"""
     await delete_session_db(db, session.id)
+    await cache.delete(session)
     del_cookie(response)
-    cache.delete_session(session)
     return Message(message="User logout successful")
 
 

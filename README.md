@@ -1,13 +1,16 @@
 ## User Authorization and Authentication Backend
 
 ### Main information
-- DB in `database.py` connected as Middleware (stored in request.scope["db"] in closed state, opens at manual get_db() call, or DBDep dependency in route, closes if was opened at filling response in middleware)
-- User and Session handling in `sessions.py` is also connected as Middleware (stored in request.user and request.session from cache or db)
-- Secure cookies used for authorization and authentication (stored session UUID, cannot be captured by JS)
-- Role-based access control (RBAC) for access to most secure routes based on permissions in roles that user have
-- DB field is_superuser in UserDB class for all resources access (including those that cannot be accessed by any RBAC role)
+- DB in `database.py` connected as Middleware and lifetime (used SQLAlchemy with async PostgreSQL driver, stored in `request.scope["db"]` in closed state, opens at manual `get_db()` call, or `DBDep` dependency in route, closes if was opened at filling response in middleware)
+- Cache in `cache.py` connected as lifetime (used async Redis, stored in `request.app.state["cache"]`, access through `get_cache()` call, or `CacheDep` dependency in route)
+- Session/User in `sessions.py` connected as Middleware and lifetime (stored in `request.session`/`request.user`(`request.session.user`), access through `get_session()`/`get_user()` call, or `SessionDep`/`UserDep` dependency in route, both filled from cache or db)
+- Secure cookies used for authorization and authentication - stored session UUID, cannot be captured by JS
+- Role-based access control (RBAC) for access to the most of secure routes based on permissions in roles that user have
+- DB field `is_superuser` in `UserDB` class for all resources access (including those that cannot be accessed by any RBAC role)
+- Pydantic-settings nested structures used for settings
 - Using Ruff linter and formatter as pre-commit hook
-- Docker Compose available
+- Docker Compose file available for start without installing PostgreSQL and Redis
+
 
 ### Getting uv
 Details: https://docs.astral.sh/uv/getting-started/installation/
@@ -18,24 +21,24 @@ Details: https://docs.astral.sh/uv/getting-started/installation/
 uv sync
 ```
 
-### Run example
+### Required .env file example
 
-#### Minimal .env file:
+#### Minimal:
 ```env
-POSTGRES_PASSWORD=root_user_password
-POSTGRES_APP_PASSWORD=app_user_password
+POSTGRES_ROOT_PASSWORD=root_user_password
+POSTGRES_PASSWORD=app_user_password
 ```
-#### Optimal .env file for tests:
+#### Optimal for tests:
 ```env
-POSTGRES_PASSWORD=root_user_password
-POSTGRES_APP_PASSWORD=app_user_password
+POSTGRES_ROOT_PASSWORD=root_user_password
+POSTGRES_PASSWORD=app_user_password
 SECURE_COOKIE=False
 DROP_DB_AT_START=True
 ADD_TEST_DATA=True
 ```
 Notes
-- POSTGRES_PASSWORD: used for creating database, creating its owner, and to start docker postgres image
-- POSTGRES_APP_PASSWORD: used for database access from app
+- POSTGRES_ROOT_PASSWORD: used for creating database, creating its owner, and to start docker postgres image
+- POSTGRES_PASSWORD: used for database access from app
 - SECURE_COOKIE: must be disabled due to http connection, and must be removed when https configured
 - DROP_DB_AT_START: recreates all tables
 - ADD_TEST_DATA: fill db with test users, roles and permissions (users/passwords in database.py (at lines 36-48))
@@ -58,16 +61,17 @@ uv run ruff check
 uv run ruff format
 ```
 
-### Alternative run in docker container (build once and run)
+### Run in docker container commands: build (use once), start as daemon, shut down
 ```sh
 docker compose build
-docker compose up
+docker compose up -d
+docker compose down
 ```
 
 
 ### Note
 - This is a simple project, completed in 7 days (first commit) - tests is not full, and must be expanded
 - Tests covers all main functionality
-- Used dict cache must be changed to Redis
 - Code coverage report is available after running test
 - There is existed, but not used user-agent in session due to time limit (working example available in a neighboring project [Skazo4nik](https://github.com/C0oo1D/Skazo4nik) on GitHub)
+- Added multi-host for PostgreSQL, but tested without configured replication

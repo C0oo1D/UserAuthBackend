@@ -1,10 +1,13 @@
 import logging
+from contextlib import AsyncExitStack, asynccontextmanager
 
 from fastapi import FastAPI
+from starlette.types import Lifespan
 
+from cache import Cache
 from database import DBMiddleware, create_db_lifespan
 from routers import secure, user
-from sessions import SessionMiddleware
+from sessions import SessionMiddleware, session_lifespan
 from settings import settings
 
 logger = logging.getLogger()
@@ -12,7 +15,18 @@ logger.setLevel(logging.DEBUG if settings.debug else logging.ERROR)
 logger.info("App is loading")
 
 
-app = FastAPI(lifespan=create_db_lifespan)
+def lifespans(*callables: Lifespan):
+    @asynccontextmanager
+    async def wrapper(app_instance: FastAPI):
+        async with AsyncExitStack() as stack:
+            add = stack.enter_async_context
+            [await add(lifespan(app_instance)) for lifespan in callables]
+            yield
+
+    return wrapper
+
+
+app = FastAPI(lifespan=lifespans(create_db_lifespan, Cache, session_lifespan))
 app.add_middleware(SessionMiddleware)
 app.add_middleware(DBMiddleware)
 app.include_router(user.router)

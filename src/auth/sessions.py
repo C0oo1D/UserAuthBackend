@@ -1,14 +1,24 @@
+from asyncio import CancelledError, create_task, sleep
+from collections.abc import AsyncGenerator
+from contextlib import asynccontextmanager
 from datetime import datetime, timedelta
 from logging import getLogger
 from typing import Annotated
 from uuid import UUID
 
 from fastapi import Depends, HTTPException, Request, Response, status
-from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
 
-from crud import delete_session_db, get_session_db, get_user_db, update_session_db
-from database import get_db
-from schemas import CacheItem, Session, User
+from cache import get_cache
+from crud import (
+    delete_session_db,
+    get_session_db,
+    get_user_db,
+    update_session_db,
+    update_sessions_db,
+)
+from database import db_maker, get_db
+from middleware import MiddlewareBase
+from schemas import Session, User
 from settings import get_utc_now, settings
 
 logger = getLogger(__name__)
@@ -16,6 +26,7 @@ logger = getLogger(__name__)
 _cookie_name = "session_id"
 _del_cookie_params = {"httponly": True, "secure": settings.secure_cookie, "samesite": "strict"}
 _set_cookie_params = _del_cookie_params | {"max_age": int(timedelta(days=365).total_seconds())}
+db_pending: dict[Session, datetime] = {}
 
 
 def is_valid(item: datetime, expire: timedelta) -> datetime | None:
@@ -30,92 +41,96 @@ def del_cookie(response: Response):
     response.delete_cookie(_cookie_name, **_del_cookie_params)
 
 
-def _create_session_middleware():  # noqa: C901 must be simplified
-    """Create function wrapper needed only for linter passing, some FastAPI undocumented issue?
-    todo: combine with starlette AuthenticationBackend and sessions for correct usage
-    todo: cache cleaner must be realized through background tasks"""
+@asynccontextmanager
+async def session_lifespan(_):
+    """Send accumulated session updates to db each minute"""
 
-    class Cache(dict[str, CacheItem]):
-        def delete_session(self, session: Session):
-            try:
-                self.pop(str(session.id))
-            except KeyError as exc:
-                raise KeyError(f"Cannot find {session.id!s} in cache, but it must be") from exc
+    async def db_filling():
+        data = dict(db_pending)
+        db_pending.clear()
+        async with db_maker.begin() as db:
+            await update_sessions_db(db, data)
 
-        def update_user(self, user: User):
-            user_id = user.id
-            for v in self.values():
-                if v.user.id == user_id:
-                    v.user = user
+    async def db_filling_handler():
+        try:
+            while True:
+                [await sleep(1) for _ in range(60)]
+                if db_pending:
+                    await db_filling()
+        except CancelledError:
+            pass
+        finally:
+            await db_filling()
 
-        def delete_user(self, user: User):
-            user_id = user.id
-            for k, v in dict(self).items():
-                if v.user.id == user_id:
-                    del self[k]
+    task = create_task(db_filling_handler())
+    yield
+    task.cancel()
 
-    class _SessionMiddleware(BaseHTTPMiddleware):
-        async def dispatch(self, request: Request, call_next: RequestResponseEndpoint) -> Response:
-            # Fill user and session in request
-            request.scope |= {"user": None, "session": {}}
-            self.process_cache()
-            delete_cookie = not await self.process_session(request)
 
-            # Next middlewares handling
-            response = await call_next(request)
+class SessionMiddleware(MiddlewareBase):
+    """todo: combine with starlette AuthenticationBackend and sessions for correct usage"""
 
-            # Remove session from cookies if checks not passed
-            if delete_cookie:
-                del_cookie(response)
-            return response
+    _scope_names = ("session", "user")
 
-        @staticmethod
-        def process_cache():
-            """Handling LRU cache items in reversed order by its validity time"""
-            for session_id, item in dict(cache).items():
-                if is_valid(item.session.updated_at, settings.session_cache_expire):
-                    break
-                cache.pop(session_id)
+    async def handle(
+        self, request: Request
+    ) -> AsyncGenerator[tuple[dict[str, Session], User], Response]:
+        # Fill user and session in request
+        delete_cookie, data = await self.process_session(request)
 
-        @staticmethod
-        async def process_session(request: Request) -> bool:
-            if not (session_id_str := request.cookies.get(_cookie_name)):
-                return True
+        # Handle request
+        response = yield data or ({}, None)
 
-            # Get session from reversed LRU cache
-            if item := cache.pop(session_id_str, None):
-                item.update()
-                request.scope |= {"user": item.user, "session": {session_id_str: item.session}}
-                cache[session_id_str] = item
-                return True
+        # Remove session from cookies if checks not passed and new cookie is not set
+        if delete_cookie and not response.headers.get("set-cookie"):
+            del_cookie(response)
+        yield
 
-            db = await get_db(request)
+    @staticmethod
+    async def process_session(
+        request: Request,
+    ) -> tuple[bool, tuple[dict[str, Session], User] | None]:
+        # Return without session
+        if not (session_id_str := request.cookies.get(_cookie_name)):
+            return False, None
 
-            if not (session_db := await get_session_db(db, session_id := UUID(session_id_str))):
-                return False
+        # Return session from cache
+        cache = get_cache(request)
+        if session := await cache.get(session_id_str):
+            session.updated_at = now = get_utc_now()
+            db_pending[session.id] = {"updated_at": now}
+            return False, ({session_id_str: session}, session.user)
 
-            if not (now := is_valid(session_db.updated_at, settings.session_expire)):
-                await delete_session_db(db, session_id)
-                return False
+        # Open db instance
+        db = await get_db(request)
 
-            await update_session_db(db, session_db, now)
+        # Delete session cookie if it is not in db
+        if not (session_db := await get_session_db(db, session_id := UUID(session_id_str))):
+            return True, None
 
-            if not (user_db := await get_user_db(db, session_db.user_id)):
-                logger.error(f"Session {session_db.id=!r} has no valid user, deleting session")
-                await delete_session_db(db, session_id)
-                return False
+        # Delete session cookie if it is not valid
+        if not (now := is_valid(session_db.updated_at, settings.session_expire)):
+            await delete_session_db(db, session_id)
+            return True, None
 
-            if not user_db.is_active:
-                logger.error(f"User {user_db.id=!r} was suspended, deleting session")
-                await delete_session_db(db, session_id)
-                return False
+        # Update session.updated_at in db
+        await update_session_db(db, session_db, now)
 
-            user, session = User.model_validate(user_db), Session.model_validate(session_db)
-            cache[session_id_str] = CacheItem(user=user, session=session)
-            request.scope |= {"user": user, "session": {session_id_str: session}}
-            return True
+        # Delete session cookie if user is not exists
+        if not (user_db := await get_user_db(db, session_db.user_id)):
+            logger.error(f"Session {session_db.id=!r} has no valid user, deleting session")
+            await delete_session_db(db, session_id)
+            return True, None
 
-    return Cache(), _SessionMiddleware
+        # Delete session cookie if user is suspended
+        if not user_db.is_active:
+            logger.error(f"User {user_db.id=!r} was suspended, deleting session")
+            await delete_session_db(db, session_id)
+            return True, None
+
+        # Update cache and return session from db
+        await cache.set(session := Session.from_db(session_db, user_db))
+        return False, ({session_id_str: session}, session.user)
 
 
 def get_user(request: Request) -> User:
@@ -132,5 +147,3 @@ def get_session(request: Request) -> Session:
 
 UserDep = Annotated[User, Depends(get_user)]
 SessionDep = Annotated[Session, Depends(get_session)]
-
-cache, SessionMiddleware = _create_session_middleware()

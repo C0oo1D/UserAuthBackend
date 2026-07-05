@@ -1,7 +1,7 @@
 from collections.abc import Sequence
 from datetime import datetime
 from logging import getLogger
-from typing import overload
+from typing import Any, overload
 from uuid import UUID
 
 from argon2.exceptions import VerifyMismatchError
@@ -164,7 +164,7 @@ async def get_roles_db(db: AsyncSession, *, with_permissions=False, **kwargs):
     return await _get_many(db, RoleDB, **kwargs)
 
 
-# Update operations
+# Update single operations
 async def update_user_db(db: AsyncSession, user_id: UUID, **kwargs):
     await db.execute(update(UserDB).where(UserDB.id == user_id).values(**kwargs))
     await db.flush()
@@ -189,6 +189,13 @@ async def update_session_db(
 
 async def suspend_user_db(db: AsyncSession, user: UserDB):
     user.is_active = False
+    await db.flush()
+
+
+# Update multiple operations
+async def update_sessions_db(db: AsyncSession, data: dict[UUID, dict[str, Any]]):
+    stmt = update(SessionDB)
+    [await db.execute(stmt.where(SessionDB.id == k).values(**v)) for k, v in data.items()]
     await db.flush()
 
 

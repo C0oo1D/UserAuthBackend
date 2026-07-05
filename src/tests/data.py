@@ -92,7 +92,7 @@ user3 = User(
 )
 
 
-class Fixed:
+class Auth:
     reg: ClassVar = {"message": "User registration successful"}
     reg_403: ClassVar = {"detail": "Cannot register user when login completed"}
     reg_409: ClassVar = {"detail": "Email already registered"}
@@ -100,6 +100,18 @@ class Fixed:
     update_400: ClassVar = {"detail": "There is nothing to change"}
     update_403: ClassVar = {"detail": "Wrong password"}
     update_409: ClassVar = {"detail": "Email already registered"}
+    update_422_equal: ClassVar = {
+        "detail": [{"msg": "Value error, Unable to update password - it is identical"}]
+    }
+    update_422_partial: ClassVar = {
+        "detail": [
+            {
+                "msg": "Value error,"
+                " Fields new_password and confirm_new_password must be both or none"
+            }
+        ]
+    }
+    update_422_mismatch: ClassVar = {"detail": [{"msg": "Value error, Passwords do not match!"}]}
     suspend: ClassVar = {"message": "User suspend successful"}
     suspend_403: ClassVar = {"detail": "Wrong password"}
     login: ClassVar = {"message": "User login successful"}
