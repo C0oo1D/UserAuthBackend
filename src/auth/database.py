@@ -9,8 +9,9 @@ from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError, ProgrammingError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
+from example_data import get_example_data
 from middleware import MiddlewareBase
-from models import PermissionDB, RoleDB, TableBase, UserDB
+from models import TableBase
 from settings import settings
 
 logger = getLogger(__name__)
@@ -18,56 +19,6 @@ logger = getLogger(__name__)
 
 engine = create_async_engine(settings.postgres.app_url, echo=settings.db_echo)
 db_maker = async_sessionmaker(engine, autoflush=False)
-
-
-def get_test_data():
-    p_gr = PermissionDB(
-        name="Get roles",
-        codename="get_roles",
-        description="Allows get roles list with permissions",
-    )
-    p_ar = PermissionDB(
-        name="Assign roles", codename="assign_roles", description="Allows assign roles for users"
-    )
-
-    r_adm = RoleDB(
-        name="Administrator", description="Has all permissions, cannot access superuser endpoints"
-    )
-    r_adm.permissions.extend((p_gr, p_ar))
-
-    r_mod = RoleDB(name="Moderator", description="Can see permissions")
-    r_mod.permissions.append(p_gr)
-
-    hasher = settings.password_hasher.hash
-
-    u_su = UserDB(
-        email="admin@example.com",
-        firstname="Admin",
-        is_superuser=True,
-        hashed_password=hasher("su_password"),
-    )
-
-    u_adm = UserDB(
-        email="i_am_admin@example.com",
-        firstname="i am admin",
-        lastname="or not",
-        hashed_password=hasher("adm_password"),
-    )
-    u_adm.roles.extend((r_mod, r_adm))
-
-    u_mod = UserDB(
-        email="moder@example.com",
-        firstname="moder",
-        surname="what a sur",
-        hashed_password=hasher("mod_password"),
-    )
-    u_mod.roles.append(r_mod)
-
-    u_std = UserDB(
-        email="stduser@example.com", firstname="filippo", hashed_password=hasher("std_password")
-    )
-
-    return [p_gr, p_ar, r_adm, r_mod, u_su, u_adm, u_mod, u_std]
 
 
 async def _create_db_and_user():
@@ -111,12 +62,12 @@ async def create_db_lifespan(_):
     else:
         raise RuntimeError("Unexpected database engine init route")
 
-    if settings.add_test_data:
+    if settings.add_example_data:
         try:
             async with db_maker.begin() as session:
-                session.add_all(get_test_data())
+                session.add_all(get_example_data())
         except IntegrityError:
-            logger.error("Cannot add test data, it maybe already added")
+            logger.error("Cannot add example data, it maybe already added")
     yield
 
 

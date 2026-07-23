@@ -8,9 +8,9 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from uvicorn import Config, Server
 
-from checks import check, equal_resp, msg_422, sort_recursively
+from checks import equal_resp, msg_422, sort_recursively
 from data import Auth, user1, user2, user3
-from database import get_test_data
+from example_data import get_example_data
 from main import app
 from models import TableBase
 from settings import settings
@@ -40,7 +40,7 @@ def db_recreate(server):
     TableBase.metadata.drop_all(db_engine)
     TableBase.metadata.create_all(db_engine)
     with sessionmaker(db_engine).begin() as session:
-        session.add_all(get_test_data())
+        session.add_all(get_example_data())
 
     return server
 
@@ -102,243 +102,201 @@ assign_ne_user = {"params": {"role": "Moderator", "user": "not_exists@example.co
 su_str = {"message": "You are admin! DB has 4 users, and 1 sessions"}
 
 
+user_params = [
+    # Register, show and logout user tests
+    pytest.param(auth_needed, show, {}, id="Show when not login"),
+    pytest.param(
+        equal_resp(200, Auth.reg, set_cookie=True), register, user1.reg, id="Register user1"
+    ),
+    pytest.param(equal_resp(200, user1.show, set_cookie=False), show, {}, id="Show user1"),
+    pytest.param(
+        equal_resp(403, Auth.reg_403, set_cookie=False),
+        register,
+        user1.reg,
+        id="Register exists when login",
+    ),
+    pytest.param(
+        equal_resp(403, Auth.reg_403, set_cookie=False),
+        register,
+        user2.reg,
+        id="Register not exists when login",
+    ),
+    pytest.param(logout_ok, logout, {}, id="Logout reg user1"),
+    pytest.param(
+        equal_resp(409, Auth.reg_409, set_cookie=False),
+        register,
+        user1.reg,
+        id="Register email exists",
+    ),
+    pytest.param(
+        equal_resp(200, Auth.reg, set_cookie=True), register, user2.reg, id="Register user2"
+    ),
+    pytest.param(equal_resp(200, user2.show, set_cookie=False), show, {}, id="Show user2"),
+    pytest.param(logout_ok, logout, {}, id="Logout reg user2"),
+    pytest.param(
+        equal_resp(200, Auth.reg, set_cookie=True), register, user3.reg, id="Register user3"
+    ),
+    pytest.param(equal_resp(200, user3.show, set_cookie=False), show, {}, id="Show user3"),
+    pytest.param(logout_ok, logout, {}, id="Logout reg user3"),
+    # Update and login user tests
+    pytest.param(auth_needed, update, user1.upd, id="Update when not login"),
+    pytest.param(
+        equal_resp(403, Auth.login_403, set_cookie=False),
+        login,
+        user1.login(email=user2.reg),
+        id="Login wrong email",
+    ),
+    pytest.param(
+        equal_resp(403, Auth.login_403, set_cookie=False),
+        login,
+        user1.login(password=user2.reg),
+        id="Login wrong password",
+    ),
+    pytest.param(login_ok, login, user1.login(), id="Login upd user1"),
+    pytest.param(
+        equal_resp(400, Auth.update_400, set_cookie=False),
+        update,
+        user1.upd_from_reg,
+        id="Update no new data",
+    ),
+    pytest.param(
+        equal_resp(403, Auth.update_403, set_cookie=False),
+        update,
+        user2.upd_from_reg,
+        id="Update wrong password",
+    ),
+    pytest.param(
+        equal_resp(409, Auth.update_409, set_cookie=False),
+        update,
+        update_email_exists,
+        id="Update email exists",
+    ),
+    pytest.param(
+        equal_resp(422, Auth.update_422_equal, set_cookie=False, json_handler=msg_422),
+        update,
+        update_passwords_equal,
+        id="Update passwords equal",
+    ),
+    pytest.param(
+        equal_resp(422, Auth.update_422_partial, set_cookie=False, json_handler=msg_422),
+        update,
+        update_passwords_partial,
+        id="Update passwords partial",
+    ),
+    pytest.param(
+        equal_resp(422, Auth.update_422_mismatch, set_cookie=False, json_handler=msg_422),
+        update,
+        update_passwords_mismatch,
+        id="Update passwords mismatch",
+    ),
+    pytest.param(
+        equal_resp(200, Auth.update, set_cookie=False), update, user1.upd, id="Update user1"
+    ),
+    pytest.param(
+        equal_resp(200, user1.show_upd, set_cookie=False), show, {}, id="Show updated user1"
+    ),
+    pytest.param(logout_ok, logout, {}, id="Logout upd user1"),
+    pytest.param(login_ok, login, user2.login(), id="Login upd user2"),
+    pytest.param(
+        equal_resp(200, Auth.update, set_cookie=False), update, user2.upd, id="Update user2"
+    ),
+    pytest.param(
+        equal_resp(200, user2.show_upd, set_cookie=False), show, {}, id="Show updated user2"
+    ),
+    pytest.param(logout_ok, logout, {}, id="Logout upd user2"),
+    pytest.param(login_ok, login, user3.login(), id="Login upd user3"),
+    pytest.param(
+        equal_resp(200, Auth.update, set_cookie=False), update, user3.upd, id="Update user3"
+    ),
+    pytest.param(
+        equal_resp(200, user3.show_upd, set_cookie=False), show, {}, id="Show updated user3"
+    ),
+    pytest.param(logout_ok, logout, {}, id="Logout upd user3"),
+    # Suspend user tests
+    pytest.param(auth_needed, suspend, user1.sus, id="Suspend when not login"),
+    pytest.param(login_ok, login, user1.login_upd(), id="Login sus user1"),
+    pytest.param(
+        equal_resp(403, Auth.suspend_403, set_cookie=False),
+        suspend,
+        user2.sus,
+        id="Suspend wrong password",
+    ),
+    pytest.param(
+        equal_resp(200, Auth.suspend, set_cookie=True), suspend, user1.sus, id="Suspend user1"
+    ),
+    pytest.param(
+        equal_resp(409, Auth.reg_409, set_cookie=False),
+        register,
+        user1.reg,
+        id="Register email exists after suspend",
+    ),
+    pytest.param(
+        equal_resp(403, Auth.login_403, set_cookie=False),
+        login,
+        user1.login(),
+        id="Login after suspend old password",
+    ),
+    pytest.param(
+        equal_resp(409, Auth.login_409, set_cookie=False),
+        login,
+        user1.login_upd(),
+        id="Login after suspend",
+    ),
+    # todo: Multiple sessions per user tests
+]
+
+secure_params = [
+    # Access when not login
+    pytest.param(auth_needed, roles, {}, id="Access roles when not login"),
+    pytest.param(auth_needed, assign, {}, id="Access assign when not login"),
+    pytest.param(auth_needed, admin, {}, id="Access admin when not login"),
+    # User tests
+    pytest.param(login_ok, login, std_cred, id="Login User"),
+    pytest.param(perm_denied, roles, {}, id="Access roles as User"),
+    pytest.param(perm_denied, assign, {}, id="Access assign as User without params"),
+    pytest.param(perm_denied, assign, assign_mod, id="Access assign as User"),
+    pytest.param(perm_denied, admin, {}, id="Access admin as User"),
+    pytest.param(logout_ok, logout, {}, id="Logout User"),
+    # Moderator tests
+    pytest.param(login_ok, login, mod_cred, id="Login Moderator"),
+    pytest.param(perm_roles, roles, {}, id="Access roles as Moderator"),
+    pytest.param(perm_denied, assign, {}, id="Access assign as Moderator without params"),
+    pytest.param(perm_denied, assign, assign_mod, id="Access assign as Moderator"),
+    pytest.param(perm_denied, admin, {}, id="Access admin as Moderator"),
+    pytest.param(logout_ok, logout, {}, id="Logout Moderator"),
+    # Administrator tests
+    pytest.param(login_ok, login, adm_cred, id="Login Administrator"),
+    pytest.param(perm_roles, roles, {}, id="Access roles as Administrator"),
+    pytest.param(perm_assign_422, assign, {}, id="Access assign as Administrator without params"),
+    pytest.param(perm_assign, assign, assign_mod, id="Access assign as Administrator"),
+    pytest.param(perm_denied, admin, {}, id="Access admin as Administrator"),
+    pytest.param(logout_ok, logout, {}, id="Logout Administrator"),
+    # UserModerator tests
+    pytest.param(login_ok, login, std_cred, id="Login UserModerator"),
+    pytest.param(perm_roles, roles, {}, id="Access roles as UserModerator"),
+    pytest.param(perm_denied, assign, {}, id="Access assign as UserModerator without params"),
+    pytest.param(perm_denied, assign, assign_mod, id="Access assign as UserModerator"),
+    pytest.param(perm_denied, admin, {}, id="Access admin as UserModerator"),
+    pytest.param(logout_ok, logout, {}, id="Logout UserModerator"),
+    # Superuser tests
+    pytest.param(login_ok, login, su_cred, id="Login superuser"),
+    pytest.param(perm_roles, roles, {}, id="Access roles as superuser"),
+    pytest.param(perm_assign_422, assign, {}, id="Access assign as superuser without params"),
+    pytest.param(perm_assign_208, assign, assign_mod, id="Access assigned before"),
+    pytest.param(perm_assign_404_role, assign, assign_ne_role, id="Access assign not exists role"),
+    pytest.param(perm_assign_404_user, assign, assign_ne_user, id="Access assign not exists user"),
+    pytest.param(equal_resp(200, su_str), admin, {}, id="Access admin as superuser"),
+    pytest.param(logout_ok, logout, {}, id="Logout superuser"),
+]
+
+
 class TestUser:
-    @pytest.mark.parametrize(
-        ("result_func", "args", "kwargs"),
-        [
-            # Register, show and logout user tests
-            pytest.param(auth_needed, show, {}, id="Show when not login"),
-            pytest.param(
-                equal_resp(200, Auth.reg, set_cookie=True),
-                register,
-                user1.reg,
-                id="Register user1",
-            ),
-            pytest.param(equal_resp(200, user1.show, set_cookie=False), show, {}, id="Show user1"),
-            pytest.param(
-                equal_resp(403, Auth.reg_403, set_cookie=False),
-                register,
-                user1.reg,
-                id="Register exists when login",
-            ),
-            pytest.param(
-                equal_resp(403, Auth.reg_403, set_cookie=False),
-                register,
-                user2.reg,
-                id="Register not exists when login",
-            ),
-            pytest.param(logout_ok, logout, {}, id="Logout reg user1"),
-            pytest.param(
-                equal_resp(409, Auth.reg_409, set_cookie=False),
-                register,
-                user1.reg,
-                id="Register email exists",
-            ),
-            pytest.param(
-                equal_resp(200, Auth.reg, set_cookie=True),
-                register,
-                user2.reg,
-                id="Register user2",
-            ),
-            pytest.param(equal_resp(200, user2.show, set_cookie=False), show, {}, id="Show user2"),
-            pytest.param(logout_ok, logout, {}, id="Logout reg user2"),
-            pytest.param(
-                equal_resp(200, Auth.reg, set_cookie=True),
-                register,
-                user3.reg,
-                id="Register user3",
-            ),
-            pytest.param(equal_resp(200, user3.show, set_cookie=False), show, {}, id="Show user3"),
-            pytest.param(logout_ok, logout, {}, id="Logout reg user3"),
-            # Update and login user tests
-            pytest.param(auth_needed, update, user1.upd, id="Update when not login"),
-            pytest.param(
-                equal_resp(403, Auth.login_403, set_cookie=False),
-                login,
-                user1.login(email=user2.reg),
-                id="Login wrong email",
-            ),
-            pytest.param(
-                equal_resp(403, Auth.login_403, set_cookie=False),
-                login,
-                user1.login(password=user2.reg),
-                id="Login wrong password",
-            ),
-            pytest.param(login_ok, login, user1.login(), id="Login upd user1"),
-            pytest.param(
-                equal_resp(400, Auth.update_400, set_cookie=False),
-                update,
-                user1.upd_from_reg,
-                id="Update no new data",
-            ),
-            pytest.param(
-                equal_resp(403, Auth.update_403, set_cookie=False),
-                update,
-                user2.upd_from_reg,
-                id="Update wrong password",
-            ),
-            pytest.param(
-                equal_resp(409, Auth.update_409, set_cookie=False),
-                update,
-                update_email_exists,
-                id="Update email exists",
-            ),
-            pytest.param(
-                equal_resp(422, Auth.update_422_equal, set_cookie=False, json_handler=msg_422),
-                update,
-                update_passwords_equal,
-                id="Update passwords equal",
-            ),
-            pytest.param(
-                equal_resp(422, Auth.update_422_partial, set_cookie=False, json_handler=msg_422),
-                update,
-                update_passwords_partial,
-                id="Update passwords partial",
-            ),
-            pytest.param(
-                equal_resp(422, Auth.update_422_mismatch, set_cookie=False, json_handler=msg_422),
-                update,
-                update_passwords_mismatch,
-                id="Update passwords mismatch",
-            ),
-            pytest.param(
-                equal_resp(200, Auth.update, set_cookie=False),
-                update,
-                user1.upd,
-                id="Update user1",
-            ),
-            pytest.param(
-                equal_resp(200, user1.show_upd, set_cookie=False),
-                show,
-                {},
-                id="Show updated user1",
-            ),
-            pytest.param(logout_ok, logout, {}, id="Logout upd user1"),
-            pytest.param(login_ok, login, user2.login(), id="Login upd user2"),
-            pytest.param(
-                equal_resp(200, Auth.update, set_cookie=False),
-                update,
-                user2.upd,
-                id="Update user2",
-            ),
-            pytest.param(
-                equal_resp(200, user2.show_upd, set_cookie=False),
-                show,
-                {},
-                id="Show updated user2",
-            ),
-            pytest.param(logout_ok, logout, {}, id="Logout upd user2"),
-            pytest.param(login_ok, login, user3.login(), id="Login upd user3"),
-            pytest.param(
-                equal_resp(200, Auth.update, set_cookie=False),
-                update,
-                user3.upd,
-                id="Update user3",
-            ),
-            pytest.param(
-                equal_resp(200, user3.show_upd, set_cookie=False),
-                show,
-                {},
-                id="Show updated user3",
-            ),
-            pytest.param(logout_ok, logout, {}, id="Logout upd user3"),
-            # Suspend user tests
-            pytest.param(auth_needed, suspend, user1.sus, id="Suspend when not login"),
-            pytest.param(login_ok, login, user1.login_upd(), id="Login sus user1"),
-            pytest.param(
-                equal_resp(403, Auth.suspend_403, set_cookie=False),
-                suspend,
-                user2.sus,
-                id="Suspend wrong password",
-            ),
-            pytest.param(
-                equal_resp(200, Auth.suspend, set_cookie=True),
-                suspend,
-                user1.sus,
-                id="Suspend user1",
-            ),
-            pytest.param(
-                equal_resp(409, Auth.reg_409, set_cookie=False),
-                register,
-                user1.reg,
-                id="Register email exists after suspend",
-            ),
-            pytest.param(
-                equal_resp(403, Auth.login_403, set_cookie=False),
-                login,
-                user1.login(),
-                id="Login after suspend old password",
-            ),
-            pytest.param(
-                equal_resp(409, Auth.login_409, set_cookie=False),
-                login,
-                user1.login_upd(),
-                id="Login after suspend",
-            ),
-            # todo: Multiple sessions per user tests
-            # todo: Pydantic validators tests
-        ],
-    )
+    @pytest.mark.parametrize(("result_func", "args", "kwargs"), user_params)
     def test_user(self, client: Client, result_func: Callable, args, kwargs):
-        check(result_func(client.request(*args, **kwargs)))
+        result_func(client.request(*args, **kwargs))
 
 
 class TestSecure:
-    @pytest.mark.parametrize(
-        ("result_func", "args", "kwargs"),
-        [
-            # Access when not login
-            pytest.param(auth_needed, roles, {}, id="Access roles when not login"),
-            pytest.param(auth_needed, assign, {}, id="Access assign when not login"),
-            pytest.param(auth_needed, admin, {}, id="Access admin when not login"),
-            # User tests
-            pytest.param(login_ok, login, std_cred, id="Login User"),
-            pytest.param(perm_denied, roles, {}, id="Access roles as User"),
-            pytest.param(perm_denied, assign, {}, id="Access assign as User without params"),
-            pytest.param(perm_denied, assign, assign_mod, id="Access assign as User"),
-            pytest.param(perm_denied, admin, {}, id="Access admin as User"),
-            pytest.param(logout_ok, logout, {}, id="Logout User"),
-            # Moderator tests
-            pytest.param(login_ok, login, mod_cred, id="Login Moderator"),
-            pytest.param(perm_roles, roles, {}, id="Access roles as Moderator"),
-            pytest.param(perm_denied, assign, {}, id="Access assign as Moderator without params"),
-            pytest.param(perm_denied, assign, assign_mod, id="Access assign as Moderator"),
-            pytest.param(perm_denied, admin, {}, id="Access admin as Moderator"),
-            pytest.param(logout_ok, logout, {}, id="Logout Moderator"),
-            # Administrator tests
-            pytest.param(login_ok, login, adm_cred, id="Login Administrator"),
-            pytest.param(perm_roles, roles, {}, id="Access roles as Administrator"),
-            pytest.param(
-                perm_assign_422, assign, {}, id="Access assign as Administrator without params"
-            ),
-            pytest.param(perm_assign, assign, assign_mod, id="Access assign as Administrator"),
-            pytest.param(perm_denied, admin, {}, id="Access admin as Administrator"),
-            pytest.param(logout_ok, logout, {}, id="Logout Administrator"),
-            # UserModerator tests
-            pytest.param(login_ok, login, std_cred, id="Login UserModerator"),
-            pytest.param(perm_roles, roles, {}, id="Access roles as UserModerator"),
-            pytest.param(
-                perm_denied, assign, {}, id="Access assign as UserModerator without params"
-            ),
-            pytest.param(perm_denied, assign, assign_mod, id="Access assign as UserModerator"),
-            pytest.param(perm_denied, admin, {}, id="Access admin as UserModerator"),
-            pytest.param(logout_ok, logout, {}, id="Logout UserModerator"),
-            # Superuser tests
-            pytest.param(login_ok, login, su_cred, id="Login superuser"),
-            pytest.param(perm_roles, roles, {}, id="Access roles as superuser"),
-            pytest.param(
-                perm_assign_422, assign, {}, id="Access assign as superuser without params"
-            ),
-            pytest.param(perm_assign_208, assign, assign_mod, id="Access assigned before"),
-            pytest.param(
-                perm_assign_404_role, assign, assign_ne_role, id="Access assign not exists role"
-            ),
-            pytest.param(
-                perm_assign_404_user, assign, assign_ne_user, id="Access assign not exists user"
-            ),
-            pytest.param(equal_resp(200, su_str), admin, {}, id="Access admin as superuser"),
-            pytest.param(logout_ok, logout, {}, id="Logout superuser"),
-        ],
-    )
+    @pytest.mark.parametrize(("result_func", "args", "kwargs"), secure_params)
     def test_secure(self, client: Client, result_func: Callable, args, kwargs):
-        check(result_func(client.request(*args, **kwargs)))
+        result_func(client.request(*args, **kwargs))

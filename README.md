@@ -34,14 +34,14 @@ POSTGRES_ROOT_PASSWORD=root_user_password
 POSTGRES_PASSWORD=app_user_password
 SECURE_COOKIE=False
 DROP_DB_AT_START=True
-ADD_TEST_DATA=True
+ADD_EXAMPLE_DATA=True
 ```
 Notes
 - POSTGRES_ROOT_PASSWORD: used for creating database, creating its owner, and to start docker postgres image
 - POSTGRES_PASSWORD: used for database access from app
 - SECURE_COOKIE: must be disabled due to http connection, and must be removed when https configured
 - DROP_DB_AT_START: recreates all tables
-- ADD_TEST_DATA: fill db with test users, roles and permissions (users/passwords in database.py (at lines 36-48))
+- ADD_EXAMPLE_DATA: fill db with example users, roles and permissions (users/passwords in example_data.py)
 
 
 #### Run:

@@ -189,7 +189,7 @@ class Settings(BaseSettings):
     secure_cookie: bool = True
     debug: bool = False
     drop_db_at_start: bool = False
-    add_test_data: bool = False
+    add_example_data: bool = False
 
     @field_validator("*", mode="before")
     @classmethod

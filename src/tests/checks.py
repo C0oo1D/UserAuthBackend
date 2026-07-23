@@ -12,12 +12,6 @@ type CheckResult[T] = Callable[[T], bool]
 _sort_t = dict | list | tuple
 
 
-def check(is_equal, error_message: str = ""):
-    """Assert replacement in case of enabled optimizations"""
-    if not is_equal:
-        raise AssertionError(error_message) if error_message else AssertionError
-
-
 @contextmanager
 def check_exc(result, msg: str = ""):
     raises_obj = None
@@ -30,7 +24,7 @@ def check_exc(result, msg: str = ""):
         yield context
 
 
-def _fmt(
+def _fmt_exc(
     _header: tuple[str, str],
     _lines: tuple[str, ...],
     info: str,
@@ -57,12 +51,12 @@ def equal(
     name: str = "",
     sep: str = "\n\t",
     **kwargs,
-) -> AssertionError | None:
+):
     if (expected == received) if invert else (expected != received):
+        __tracebackhide__ = True
         _equal = ("not equal", "equal, but must not")
         _lines = f"Expected: {expected!r}", f"Received: {received!r}"
-        return _fmt(_equal, _lines, info, name, sep, *args, invert=invert, **kwargs)
-    return None
+        raise _fmt_exc(_equal, _lines, info, name, sep, *args, invert=invert, **kwargs)
 
 
 def inside(
@@ -74,12 +68,12 @@ def inside(
     name: str = "",
     sep: str = "\n\t",
     **kwargs,
-) -> AssertionError | None:
+):
     if (item in items) if invert else (item not in items):
+        __tracebackhide__ = True
         _inside = ("not inside", "inside, but must not")
         _lines = f"Item: {item!r}", f"Items: {items!r}"
-        return _fmt(_inside, _lines, info, name, sep, *args, invert=invert, **kwargs)
-    return None
+        raise _fmt_exc(_inside, _lines, info, name, sep, *args, invert=invert, **kwargs)
 
 
 def equal_resp[T: Response](
@@ -101,21 +95,20 @@ def equal_resp[T: Response](
         if code:
             arg = partial(try_json, resp)
             equal(code, resp.status_code, "Response: {!r}", arg, name="Status code", sep=". ")
+
         if json is not None:
             r_json = resp.json()
             r_json_handled = json_handler(r_json) if json_handler else r_json
             equal(json, r_json_handled, "Received RAW: {!r}", r_json, name="JSON")
+
         if set_cookie is not None:
-            if set_cookie:
-                inside("set-cookie", resp.headers, name="Cookie")
-            else:
-                inside("set-cookie", resp.headers, name="Cookie", invert=True)
+            inside("set-cookie", resp.headers, name="Cookie", invert=not set_cookie)
+
         return True
 
     return wrapper
 
 
-# noinspection PyTypeChecker
 def sort_recursively[T: _sort_t](data: T, dict_key: str = "name") -> T:
     """For repeatable tests with possible not ordered data"""
     if isinstance(data, list | tuple):
