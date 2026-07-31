@@ -1,10 +1,10 @@
 from collections.abc import Sequence
 from datetime import datetime
-from logging import getLogger
 from typing import Any, overload
 from uuid import UUID
 
 from argon2.exceptions import VerifyMismatchError
+from loguru import logger
 from sqlalchemy import delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import InstrumentedAttribute as Col
@@ -13,8 +13,6 @@ from sqlalchemy.orm import joinedload
 from models import RoleDB, SessionDB, TableBase, UserDB
 from schemas import RegisterUserForm
 from settings import get_utc_now, settings
-
-logger = getLogger(__name__)
 
 
 # Helper functions

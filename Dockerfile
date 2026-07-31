@@ -51,6 +51,9 @@ STOPSIGNAL SIGINT
 RUN groupadd --system --gid 999 nonroot \
  && useradd --system --gid 999 --uid 999 --create-home nonroot
 
+# Create logs dir with correct ownership before switching to nonroot
+RUN mkdir -p /app/logs && chown -R nonroot:nonroot /app/logs
+
 # Use the non-root user to run our application
 USER nonroot
 
@@ -72,9 +75,6 @@ COPY --from=builder --chown=nonroot:nonroot app_project/src/$app_name/ app/
 
 # App path
 WORKDIR /app
-
-# Add app env file
-COPY .env .env
 
 # Run the application
 CMD ["python", "main.py"]

@@ -1,4 +1,5 @@
 from collections.abc import Callable
+from functools import partial
 from threading import Thread
 from time import sleep
 
@@ -6,28 +7,31 @@ import pytest
 from httpx import Client
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
-from uvicorn import Config, Server
 
 from checks import equal_resp, msg_422, sort_recursively
 from data import Auth, user1, user2, user3
 from example_data import get_example_data
-from main import app
 from models import TableBase
+from server import LoggedServer, run
 from settings import settings
 
 db_engine = create_engine(settings.postgres.test_url)
-_base_url = f"http://{settings.host}:{settings.port}"
+_base_url = f"http://{settings.server.host}:{settings.server.port}"
 
 
 @pytest.fixture(scope="module")
 def server():
     """TestClient is not working due to event loop closed conflicts between httpx and asyncpg"""
-    server = Server(Config(app, host=settings.host, port=settings.port))
-
-    server_thread = Thread(target=server.run, daemon=True)
+    server = LoggedServer(config := settings.server.config_tests)
+    server_thread = Thread(target=partial(run, config, server), daemon=True)
     server_thread.start()
-    while not server.started:
+
+    retries = 0
+    while not server.started and retries < 100:
         sleep(0.1)
+        retries += 1
+    if retries >= 100:
+        raise SystemError(f"Server is not started after {retries // 10}s")
 
     yield
 

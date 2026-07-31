@@ -3,16 +3,22 @@ services:
     image: auth-app
     pull_policy: never
     build: .
+    env_file:
+      - .env
     environment:
       - POSTGRES_HOST=postgres
       - REDIS_HOST=redis
-      - HOST=0.0.0.0
+      - SERVER_HOST=0.0.0.0
     ports:
       - "80:80"
     restart: unless-stopped
     depends_on:
-      - postgres
-      - redis
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - logs:/app/logs
 
   postgres:
     image: postgres:17
@@ -23,14 +29,19 @@ services:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
       test: [ "CMD-SHELL", "pg_isready -U postgres" ]
-      interval: 10s
-      timeout: 5s
+      interval: 5s
+      timeout: 3s
       retries: 5
 
   redis:
     image: redis:8
     restart: unless-stopped
-
+    healthcheck:
+      test: [ "CMD", "redis-cli", "ping" ]
+      interval: 5s
+      timeout: 3s
+      retries: 5
 
 volumes:
   postgres_data:
+  logs:

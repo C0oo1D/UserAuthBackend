@@ -10,6 +10,7 @@
 - Pydantic-settings nested structures used for settings
 - Using Ruff linter and formatter as pre-commit hook
 - Docker Compose file available for start without installing PostgreSQL and Redis
+- Loguru is used for logging to decrease boilerplate code, it is also configurable through env
 
 
 ### Getting uv

@@ -1,5 +1,5 @@
 from collections.abc import Callable
-from contextlib import contextmanager, nullcontext
+from contextlib import contextmanager
 from functools import partial
 from json import JSONDecodeError
 from re import escape
@@ -13,15 +13,16 @@ _sort_t = dict | list | tuple
 
 
 @contextmanager
-def check_exc(result, msg: str = ""):
-    raises_obj = None
-    if isinstance(result, type) and issubclass(result, Exception):
-        raises_obj = pytest.raises(result, match=escape(msg) or None)
-    elif isinstance(result, Exception):
-        raises_obj = pytest.raises(type(result), match=escape(result.args[0]))
+def check_exc(exception: type[Exception] | Exception, msg: str = ""):
+    if isinstance(exception, type) and issubclass(exception, Exception):
+        raises_obj = pytest.raises(exception, match=escape(msg) or None)
+    elif isinstance(exception, Exception):
+        raises_obj = pytest.raises(type(exception), match=escape(exception.args[0]))
+    else:
+        raise ValueError(f"Wrong type provided: {exception=!r} ({type(exception)})")
 
-    with raises_obj or nullcontext() as context:
-        yield context
+    with raises_obj:
+        yield
 
 
 def _fmt_exc(

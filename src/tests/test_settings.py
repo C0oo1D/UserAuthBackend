@@ -2,7 +2,7 @@ import pytest
 from pydantic import ValidationError
 
 from checks import check_exc, equal
-from settings import MultihostURL, PostgresSettings, UrlBase
+from settings import LogSettings, MultihostURL, PostgresSettings, ServerSettings, UrlBase
 
 # Constants
 driver = "driver"
@@ -65,6 +65,10 @@ kw_single = {"hosts": (host,)}
 kw_single_w_port = {"hosts": (f"{host}:{port2}",)}
 
 kw_pg = kw_user | kw_pass | {"root_password": password}
+
+kw_merge_with_default = {"level": "INFO", "enqueue": True}
+
+kw_extra_default = {"host": "localhost", "port": 80, "workers": None, "access_log": False}
 
 
 class WrongMultihost(UrlBase):
@@ -154,14 +158,12 @@ class TestFixedURL:
 
     @pytest.mark.parametrize(("expected", "kwargs"), fixed_url_params)
     def test_str(self, expected: str, kwargs: dict):
-        if exc := equal(expected, str(MultihostURL.create(driver, **kwargs)), name=self.name):
-            raise exc
+        equal(expected, str(MultihostURL.create(driver, **kwargs)), name=self.name)
 
     def test_show(self):
         expected = f"{r_driver}{r_username}:{r_password}@"
         received = MultihostURL.create(driver, **kw_username | kw_pass).render_as_string(False)  # noqa: FBT003
-        if exc := equal(expected, received, name=self.name):
-            raise exc
+        equal(expected, received, name=self.name)
 
     def test_multihost_wrong_ipv6(self):
         with check_exc(ValueError, "Wrong multihost item='[::2]2'"):
@@ -179,8 +181,7 @@ class TestURLBase:
     @pytest.mark.parametrize(("classes", "result", "kwargs"), url_base_params)
     def test_usage(self, classes: tuple[type[UrlBase], ...], result: str, kwargs: dict):
         for cls in classes:
-            if exc := equal(r_scheme + result, str(cls(**kwargs).app_url), name=self.name):
-                raise exc
+            equal(r_scheme + result, str(cls(**kwargs).app_url), name=self.name)
 
 
 class TestPostgresSettings:
@@ -189,11 +190,33 @@ class TestPostgresSettings:
     def test_root_url(self):
         expected = f"postgresql+asyncpg://postgres:{r_password}@localhost/postgres"
         received = PostgresSettings(**kw_pg).root_url.render_as_string(hide_password=False)
-        if exc := equal(expected, received, name=self.name):
-            raise exc
+        equal(expected, received, name=self.name)
 
     def test_test_url(self):
         expected = f"postgresql://{r_username}:{r_password}@localhost/auth"
         received = PostgresSettings(**kw_pg).test_url.render_as_string(hide_password=False)
-        if exc := equal(expected, received, name=self.name):
-            raise exc
+        equal(expected, received, name=self.name)
+
+
+class TestMergeWithDefault:
+    name = "MergeWithDefault"
+
+    def test_usage(self):
+        some = {"test_key": "test_value"}
+        equal(kw_merge_with_default, LogSettings().console_kw, name=self.name)
+        equal(kw_merge_with_default | some, LogSettings(console_kw=some).console_kw)
+
+
+class TestExtraSettings:
+    name = "ExtraSettings"
+
+    def test_extra_kw(self):
+        equal({}, ServerSettings().extra_kw, name=self.name)
+        with check_exc(ValueError, "Field ServerSettings.extra_kw has exists fields: port"):
+            ServerSettings(extra_kw={"port": 12345})
+        with check_exc(TypeError, "Config.__init__() got an unexpected keyword argument 'wrong'"):
+            ServerSettings(extra_kw={"wrong": "not_exists_field"})
+
+    def test_as_dict(self):
+        extra = {"loop": "none"}
+        equal(kw_extra_default | extra, ServerSettings(extra_kw=extra).as_dict(), name=self.name)

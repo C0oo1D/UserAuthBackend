@@ -2,11 +2,11 @@ from asyncio import CancelledError, create_task, sleep
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta
-from logging import getLogger
 from typing import Annotated
 from uuid import UUID
 
 from fastapi import Depends, HTTPException, Request, Response, status
+from loguru import logger
 
 from cache import get_cache
 from crud import (
@@ -20,8 +20,6 @@ from database import db_maker, get_db
 from middleware import MiddlewareBase
 from schemas import Session, User
 from settings import get_utc_now, settings
-
-logger = getLogger(__name__)
 
 _cookie_name = "session_id"
 _del_cookie_params = {"httponly": True, "secure": settings.secure_cookie, "samesite": "strict"}

@@ -1,10 +1,10 @@
 from collections.abc import AsyncGenerator
-from contextlib import AsyncExitStack, asynccontextmanager, suppress
-from logging import getLogger
+from contextlib import AsyncExitStack, suppress
 from typing import Annotated
 
 from asyncpg import ConnectionDoesNotExistError, InvalidAuthorizationSpecificationError
 from fastapi import Depends, Request
+from loguru import logger
 from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError, ProgrammingError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
@@ -13,9 +13,6 @@ from example_data import get_example_data
 from middleware import MiddlewareBase
 from models import TableBase
 from settings import settings
-
-logger = getLogger(__name__)
-
 
 engine = create_async_engine(settings.postgres.app_url, echo=settings.db_echo)
 db_maker = async_sessionmaker(engine, autoflush=False)
@@ -40,15 +37,16 @@ async def _create_db_and_user():
         raise RuntimeError(f"Failed connect to {pg.root_url}, wrong admin password?") from exc
 
 
-@asynccontextmanager
-async def create_db_lifespan(_):
+async def create_db():
     """Create database, owner and tables (only if they do not exist)"""
     for retry in range(2):
         try:
             async with engine.begin() as conn:
                 if settings.drop_db_at_start:
                     await conn.run_sync(TableBase.metadata.drop_all)
+                    logger.info("DB tables dropped")
                 await conn.run_sync(TableBase.metadata.create_all)
+                logger.info("DB tables checked (exists or created)")
             break
 
         except (InvalidAuthorizationSpecificationError, ConnectionDoesNotExistError) as exc:
@@ -66,9 +64,13 @@ async def create_db_lifespan(_):
         try:
             async with db_maker.begin() as session:
                 session.add_all(get_example_data())
+                logger.info("DB filled by example data")
         except IntegrityError:
             logger.error("Cannot add example data, it maybe already added")
-    yield
+
+    # Closing the engine because the async loop will also close
+    await engine.dispose()
+    logger.info("DB initialized")
 
 
 class DBMiddleware(MiddlewareBase):

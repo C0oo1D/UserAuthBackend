@@ -1,20 +1,40 @@
 from datetime import UTC, datetime, timedelta
 from functools import cached_property, partial
 from pathlib import Path
-from typing import Annotated, Literal
+from typing import Annotated, Any, Literal
 from urllib.parse import quote, quote_plus
 
 from argon2 import PasswordHasher
-from pydantic import BaseModel, Field, SecretStr, ValidationInfo, field_validator, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    SecretStr,
+    ValidationInfo,
+    field_validator,
+    model_validator,
+)
+from pydantic.fields import FieldInfo
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from sqlalchemy import URL, util
+from uvicorn import Config
 
 app_name = Path(__file__).parent.name
 get_utc_now = partial(datetime.now, tz=UTC)  # sqlalchemy.func.utcnow() fails in asyncpg
-PassHasherAn = Annotated[PasswordHasher, Field(alias="password_hasher_kw", default_factory=dict)]
+
 type query_dict = dict[str, str | tuple[str, ...]]
 type query_tuple = tuple[tuple[str, str], ...]
 type query_t = query_dict | query_tuple
+
+
+def opt_an[T: type](cls: T):
+    """Annotated optional type with default factory if not provided"""
+    return Annotated[cls, Field(default_factory=cls)]
+
+
+def get_field(cls: type[BaseModel], info: ValidationInfo) -> tuple[str, FieldInfo]:
+    """Get field name and info at validation"""
+    return (field_name := str(info.field_name)), cls.__pydantic_fields__[field_name]
 
 
 class MultihostURL(URL):
@@ -71,7 +91,27 @@ class MultihostURL(URL):
         return s
 
 
-class UrlBase(BaseModel):
+class StrictModel(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+
+class ExtraModel(StrictModel):
+    """Default extra="allow" is not validating fields (for example int is parsed as str)"""
+
+    extra_kw: Annotated[dict[str, Any], Field(exclude=True, default={})]
+
+    def as_dict(self) -> dict[str, Any]:
+        return self.model_dump() | self.extra_kw
+
+    @model_validator(mode="after")
+    def verify(self):
+        if wrong := set(self.__pydantic_fields__) & set(self.extra_kw):
+            cls_name = type(self).__name__
+            raise ValueError(f"Field {cls_name}.extra_kw has exists fields: {', '.join(wrong)}")
+        return self
+
+
+class UrlBase(StrictModel):
     """Base settings model for urls
     Hidden parameters can be filled only at subclassing, other - subclassing (as default) and init
     :param _multihost_place: place for multihost, if available
@@ -171,32 +211,71 @@ class RedisSettings(UrlBase):
     scheme: str = "redis"
 
 
+class LogSettings(StrictModel):
+    """Defaults always provided, use JSON string '{"level": null}' to disable specified log"""
+
+    console_kw: dict = {"level": "INFO", "enqueue": True}
+    file_kw: dict = {
+        "level": "DEBUG",
+        "enqueue": True,
+        "rotation": "00:00",
+        "retention": "3 month",
+        "compression": "gz",
+        "serialize": True,
+    }
+
+    @field_validator("*", mode="before")
+    @classmethod
+    def merge_with_default(cls, value, info: ValidationInfo):
+        return get_field(cls, info)[1].default | (value or {})
+
+
+class ServerSettings(ExtraModel):
+    host: str = "localhost"
+    port: int = 80
+    workers: int | None = None
+    access_log: bool = False
+
+    def model_post_init(self, _):
+        """Load config after init (initialize uvicorn logging handlers for loguru intercept)"""
+        return self.config
+
+    @cached_property
+    def config(self) -> Config:
+        return Config("app:app", **self.as_dict())
+
+    @cached_property
+    def config_tests(self):
+        """NOTE: Tests is not runnable with uvicorn workers (at least for now)"""
+        kwargs = self.as_dict()
+        kwargs.pop("workers", None)
+        return Config("app:app", **kwargs)
+
+
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
         env_file=".env", env_nested_delimiter="_", env_nested_max_split=1, extra="forbid"
     )
 
     postgres: PostgresSettings
-    redis: Annotated[RedisSettings, Field(default_factory=RedisSettings)]
-    password_hasher: PassHasherAn
+    redis: opt_an(RedisSettings)
+    password_hasher: Annotated[PasswordHasher, Field(alias="password_hasher_kw", default={})]
     session_expire: Annotated[timedelta, Field(alias="session_expire_kw", default={"days": 14})]
     session_cache_expire: Annotated[
         timedelta, Field(alias="session_cache_expire_kw", default={"hours": 6})
     ]
-    host: str = "localhost"
-    port: int = 80
+    log: opt_an(LogSettings)
+    server: opt_an(ServerSettings)
     db_echo: bool = False
     secure_cookie: bool = True
-    debug: bool = False
     drop_db_at_start: bool = False
     add_example_data: bool = False
 
     @field_validator("*", mode="before")
     @classmethod
     def parse_kw(cls, value, info: ValidationInfo):
-        """Parse keyword arguments and pass them to the target type initializer (if not dict)"""
-        field_name = str(info.field_name)  # Attached to model fields, there is no None possible
-        field = cls.__pydantic_fields__[field_name]
+        """Parse keyword arguments and pass them to the target type initializer"""
+        field_name, field = get_field(cls, info)
         if (alias := field.alias) and alias.endswith("_kw") and not field_name.endswith("_kw"):
             value = field.annotation(**value)
         return value
