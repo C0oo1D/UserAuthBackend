@@ -50,10 +50,10 @@ def init_logging():
         )
 
     # Initialize loguru console logger
+    logger.remove()
     if (log_console_kw := settings.log.console_kw)["level"] is not None:
         import sys
 
-        logger.remove()
         logger.add(sys.stderr, **kwargs, **log_console_kw)
 
     # Initialize loguru file logger

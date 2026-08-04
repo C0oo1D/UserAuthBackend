@@ -66,10 +66,6 @@ kw_single_w_port = {"hosts": (f"{host}:{port2}",)}
 
 kw_pg = kw_user | kw_pass | {"root_password": password}
 
-kw_merge_with_default = {"level": "INFO", "enqueue": True}
-
-kw_extra_default = {"host": "localhost", "port": 80, "workers": None, "access_log": False}
-
 
 class WrongMultihost(UrlBase):
     _multihost_place = "somewhere"
@@ -202,9 +198,10 @@ class TestMergeWithDefault:
     name = "MergeWithDefault"
 
     def test_usage(self):
-        some = {"test_key": "test_value"}
-        equal(kw_merge_with_default, LogSettings().console_kw, name=self.name)
-        equal(kw_merge_with_default | some, LogSettings(console_kw=some).console_kw)
+        fields, data = LogSettings.__pydantic_fields__, {"key": "value"}
+        default = fields["common_kw"].default | fields["console_kw"].default
+        equal(default, LogSettings().console_kw, name=self.name)
+        equal(default | data, LogSettings(console_kw=data).console_kw)
 
 
 class TestExtraSettings:
@@ -218,5 +215,5 @@ class TestExtraSettings:
             ServerSettings(extra_kw={"wrong": "not_exists_field"})
 
     def test_as_dict(self):
-        extra = {"loop": "none"}
-        equal(kw_extra_default | extra, ServerSettings(extra_kw=extra).as_dict(), name=self.name)
+        default, extra = ServerSettings().as_dict(), {"loop": "none"}
+        equal(default | extra, ServerSettings(extra_kw=extra).as_dict(), name=self.name)

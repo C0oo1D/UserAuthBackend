@@ -214,20 +214,26 @@ class RedisSettings(UrlBase):
 class LogSettings(StrictModel):
     """Defaults always provided, use JSON string '{"level": null}' to disable specified log"""
 
-    console_kw: dict = {"level": "INFO", "enqueue": True}
+    common_kw: dict = {"enqueue": True, "diagnose": False, "backtrace": False}
+    console_kw: dict = {"level": "INFO"}
     file_kw: dict = {
         "level": "DEBUG",
-        "enqueue": True,
         "rotation": "00:00",
         "retention": "3 month",
         "compression": "gz",
         "serialize": True,
     }
 
-    @field_validator("*", mode="before")
+    @model_validator(mode="before")
     @classmethod
-    def merge_with_default(cls, value, info: ValidationInfo):
-        return get_field(cls, info)[1].default | (value or {})
+    def merge_dicts(cls, data: dict):
+        """Note: Used before validator due to https://github.com/pydantic/pydantic/issues/6978"""
+        common_name, fields = "common_kw", dict(cls.__pydantic_fields__)
+        common_default, common = fields.pop(common_name).default, data.get(common_name, {})
+        data[common_name] = common_default | common
+        for name, field in fields.items():
+            data[name] = common_default | field.default | common | data.get(name, {})
+        return data
 
 
 class ServerSettings(ExtraModel):
